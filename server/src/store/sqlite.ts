@@ -1,51 +1,12 @@
 import { DatabaseSync } from 'node:sqlite'
 import { randomBytes, randomInt } from 'node:crypto'
-import { newOrderCode } from './money.js'
-import type { MatchableOrder, OrderStatus } from './matcher.js'
+import { newOrderCode } from '../money.js'
+import type { OrderStatus } from '../matcher.js'
+import { nowSec as now, type PendingAction, type BotStep, type Customer, type EventPayload, type Order, type PaymentRow, type Seller, type StoredEvent, type TillStore } from './types.js'
 
-export interface Seller {
-  id: number
-  name: string
-  address: string // user-friendly form, used in links and display
-  addressRaw: string // 0:… form, used for comparisons
-  tgChatId: number | null
-  timezone: string | null // IANA zone, e.g. "Europe/Berlin"; null = server default
-  language: string // spoken-command language (ISO-639-1), default "en"
-}
-
-export interface Order extends MatchableOrder {
-  sellerId: number
-  label: string // "Tunde", "Table 4", "Walk-in"
-  item: string | null
-  customerId: number | null
-  createdAt: number
-  paidAt: number | null
-  txHash: string | null
-  payer: string | null
-  late: boolean
-}
-
-export interface Customer {
-  id: number
-  sellerId: number
-  name: string
-  tgChatId: number | null
-}
-
-export interface PaymentRow {
-  txHash: string
-  sellerId: number
-  amountNano: bigint
-  comment: string | null
-  from: string | null
-  utime: number
-  result: string
-  orderId: number | null
-}
-
-const now = () => Math.floor(Date.now() / 1000)
-
-export class Store {
+/** SQLite store (node:sqlite, no native modules): local development and tests. */
+export class SqliteStore implements TillStore {
+  readonly kind = 'sqlite' as const
   readonly db: DatabaseSync
 
   constructor(path = ':memory:') {
@@ -115,6 +76,24 @@ export class Store {
         lt TEXT NOT NULL,
         hash TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        seller_id INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS events_seller ON events (seller_id, id);
+      CREATE TABLE IF NOT EXISTS pending (
+        id TEXT PRIMARY KEY,
+        seller_id INTEGER NOT NULL,
+        action TEXT NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS bot_state (
+        chat_id INTEGER PRIMARY KEY,
+        step TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
     `)
     // Migration: per-seller time zone (sellers can be anywhere).
     const cols = this.db.prepare('PRAGMA table_info(sellers)').all() as { name: string }[]
@@ -124,47 +103,47 @@ export class Store {
 
   // ---------- sellers ----------
 
-  createSeller(name: string, address: string, addressRaw: string, tgChatId: number | null): Seller {
+  async createSeller(name: string, address: string, addressRaw: string, tgChatId: number | null): Promise<Seller> {
     const r = this.db
       .prepare('INSERT INTO sellers (name, address, address_raw, tg_chat_id, created_at) VALUES (?, ?, ?, ?, ?)')
       .run(name, address, addressRaw, tgChatId, now())
-    return this.getSeller(Number(r.lastInsertRowid))!
+    return (await this.getSeller(Number(r.lastInsertRowid)))!
   }
 
-  updateSellerAddress(id: number, address: string, addressRaw: string) {
+  async updateSellerAddress(id: number, address: string, addressRaw: string) {
     this.db.prepare('UPDATE sellers SET address = ?, address_raw = ? WHERE id = ?').run(address, addressRaw, id)
     this.db.prepare('DELETE FROM cursors WHERE seller_id = ?').run(id) // new wallet: start fresh
   }
 
-  updateSellerTimezone(id: number, timezone: string) {
+  async updateSellerTimezone(id: number, timezone: string) {
     this.db.prepare('UPDATE sellers SET timezone = ? WHERE id = ?').run(timezone, id)
   }
 
-  updateSellerLanguage(id: number, language: string) {
+  async updateSellerLanguage(id: number, language: string) {
     this.db.prepare('UPDATE sellers SET language = ? WHERE id = ?').run(language, id)
   }
 
-  updateSellerName(id: number, name: string) {
+  async updateSellerName(id: number, name: string) {
     this.db.prepare('UPDATE sellers SET name = ? WHERE id = ?').run(name, id)
   }
 
-  getSeller(id: number): Seller | null {
+  async getSeller(id: number): Promise<Seller | null> {
     const r = this.db.prepare('SELECT * FROM sellers WHERE id = ?').get(id) as any
     return r ? toSeller(r) : null
   }
 
-  getSellerByChat(chatId: number): Seller | null {
+  async getSellerByChat(chatId: number): Promise<Seller | null> {
     const r = this.db.prepare('SELECT * FROM sellers WHERE tg_chat_id = ?').get(chatId) as any
     return r ? toSeller(r) : null
   }
 
-  listSellers(): Seller[] {
+  async listSellers(): Promise<Seller[]> {
     return (this.db.prepare('SELECT * FROM sellers').all() as any[]).map(toSeller)
   }
 
   // ---------- pairing (glasses app has no Google sign-in; use a 6-digit code from the bot) ----------
 
-  createPairCode(sellerId: number, ttlSec = 600): string {
+  async createPairCode(sellerId: number, ttlSec = 600): Promise<string> {
     this.db.prepare('DELETE FROM pair_codes WHERE seller_id = ? OR expires_at < ?').run(sellerId, now())
     let code: string
     do code = String(randomInt(0, 1_000_000)).padStart(6, '0')
@@ -174,30 +153,30 @@ export class Store {
   }
 
   /** One-time: a code can be redeemed once, then it is gone. Returns a device token. */
-  redeemPairCode(code: string): { token: string; seller: Seller } | null {
+  async redeemPairCode(code: string): Promise<{ token: string; seller: Seller } | null> {
     const r = this.db.prepare('SELECT * FROM pair_codes WHERE code = ? AND expires_at >= ?').get(code.trim(), now()) as any
     if (!r) return null
     this.db.prepare('DELETE FROM pair_codes WHERE code = ?').run(r.code)
     const token = randomBytes(24).toString('base64url')
     this.db.prepare('INSERT INTO devices (token, seller_id, created_at) VALUES (?, ?, ?)').run(token, r.seller_id, now())
-    return { token, seller: this.getSeller(r.seller_id)! }
+    return { token, seller: (await this.getSeller(r.seller_id))! }
   }
 
-  sellerForToken(token: string | undefined | null): Seller | null {
+  async sellerForToken(token: string | undefined | null): Promise<Seller | null> {
     if (!token) return null
     const r = this.db.prepare('SELECT seller_id FROM devices WHERE token = ?').get(token) as any
-    return r ? this.getSeller(r.seller_id) : null
+    return r ? await this.getSeller(r.seller_id) : null
   }
 
-  revokeDevices(sellerId: number) {
+  async revokeDevices(sellerId: number) {
     this.db.prepare('DELETE FROM devices WHERE seller_id = ?').run(sellerId)
   }
 
   // ---------- customers & menu ----------
 
-  upsertCustomer(sellerId: number, name: string, tgChatId: number | null): Customer {
+  async upsertCustomer(sellerId: number, name: string, tgChatId: number | null): Promise<Customer> {
     const clean = name.trim().replace(/\s+/g, ' ')
-    const existing = this.findCustomer(sellerId, clean)
+    const existing = await this.findCustomer(sellerId, clean)
     if (existing) {
       if (tgChatId && existing.tgChatId !== tgChatId) {
         this.db.prepare('UPDATE customers SET tg_chat_id = ? WHERE id = ?').run(tgChatId, existing.id)
@@ -211,31 +190,31 @@ export class Store {
     return { id: Number(r.lastInsertRowid), sellerId, name: clean, tgChatId }
   }
 
-  findCustomer(sellerId: number, name: string): Customer | null {
+  async findCustomer(sellerId: number, name: string): Promise<Customer | null> {
     const r = this.db.prepare('SELECT * FROM customers WHERE seller_id = ? AND name = ?').get(sellerId, name.trim()) as any
     return r ? toCustomer(r) : null
   }
 
-  getCustomer(id: number): Customer | null {
+  async getCustomer(id: number): Promise<Customer | null> {
     const r = this.db.prepare('SELECT * FROM customers WHERE id = ?').get(id) as any
     return r ? toCustomer(r) : null
   }
 
-  listCustomers(sellerId: number): Customer[] {
+  async listCustomers(sellerId: number): Promise<Customer[]> {
     return (this.db.prepare('SELECT * FROM customers WHERE seller_id = ? ORDER BY name').all(sellerId) as any[]).map(toCustomer)
   }
 
-  setMenuItem(sellerId: number, item: string, amountNano: bigint) {
+  async setMenuItem(sellerId: number, item: string, amountNano: bigint) {
     this.db
       .prepare('INSERT INTO menu (seller_id, item, amount_nano) VALUES (?, ?, ?) ON CONFLICT(seller_id, item) DO UPDATE SET amount_nano = excluded.amount_nano')
       .run(sellerId, item.trim().toLowerCase(), amountNano.toString())
   }
 
-  removeMenuItem(sellerId: number, item: string) {
+  async removeMenuItem(sellerId: number, item: string) {
     this.db.prepare('DELETE FROM menu WHERE seller_id = ? AND item = ?').run(sellerId, item.trim().toLowerCase())
   }
 
-  listMenu(sellerId: number): { item: string; amountNano: bigint }[] {
+  async listMenu(sellerId: number): Promise<{ item: string; amountNano: bigint }[]> {
     return (this.db.prepare('SELECT item, amount_nano FROM menu WHERE seller_id = ? ORDER BY item').all(sellerId) as any[]).map(r => ({
       item: r.item,
       amountNano: BigInt(r.amount_nano),
@@ -244,14 +223,14 @@ export class Store {
 
   // ---------- orders ----------
 
-  createOrder(input: {
+  async createOrder(input: {
     sellerId: number
     label: string
     amountNano: bigint
     item?: string | null
     customerId?: number | null
     ttlSec?: number
-  }): Order {
+  }): Promise<Order> {
     let code: string
     do code = newOrderCode()
     while (this.db.prepare('SELECT 1 FROM orders WHERE code = ?').get(code))
@@ -261,65 +240,66 @@ export class Store {
         'INSERT INTO orders (seller_id, code, label, item, customer_id, amount_nano, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       )
       .run(input.sellerId, code, input.label, input.item ?? null, input.customerId ?? null, input.amountNano.toString(), 'waiting', t, t + (input.ttlSec ?? 30 * 60))
-    return this.getOrder(Number(r.lastInsertRowid))!
+    return (await this.getOrder(Number(r.lastInsertRowid)))!
   }
 
-  getOrder(id: number): Order | null {
+  async getOrder(id: number): Promise<Order | null> {
     const r = this.db.prepare('SELECT * FROM orders WHERE id = ?').get(id) as any
     return r ? toOrder(r) : null
   }
 
-  getOrderByCode(code: string): Order | null {
+  async getOrderByCode(code: string): Promise<Order | null> {
     const r = this.db.prepare('SELECT * FROM orders WHERE code = ?').get(code.toUpperCase()) as any
     return r ? toOrder(r) : null
   }
 
   /** Orders that a payment could match (any status, so we can report duplicates/cancelled). */
-  ordersForMatching(sellerId: number): Order[] {
+  async ordersForMatching(sellerId: number): Promise<Order[]> {
     return (this.db.prepare('SELECT * FROM orders WHERE seller_id = ? ORDER BY id DESC LIMIT 500').all(sellerId) as any[]).map(toOrder)
   }
 
-  waitingOrders(sellerId: number): Order[] {
+  async waitingOrders(sellerId: number): Promise<Order[]> {
     return (this.db.prepare("SELECT * FROM orders WHERE seller_id = ? AND status = 'waiting' ORDER BY id DESC").all(sellerId) as any[]).map(toOrder)
   }
 
-  latestWaitingOrder(sellerId: number): Order | null {
-    return this.waitingOrders(sellerId)[0] ?? null
+  async latestWaitingOrder(sellerId: number): Promise<Order | null> {
+    return (await this.waitingOrders(sellerId))[0] ?? null
   }
 
-  lastOrder(sellerId: number): Order | null {
+  async lastOrder(sellerId: number): Promise<Order | null> {
     const r = this.db.prepare('SELECT * FROM orders WHERE seller_id = ? ORDER BY id DESC LIMIT 1').get(sellerId) as any
     return r ? toOrder(r) : null
   }
 
-  markPaid(orderId: number, txHash: string, payer: string | null, late: boolean, paidAt: number) {
+  async markPaid(orderId: number, txHash: string, payer: string | null, late: boolean, paidAt: number) {
     this.db
       .prepare("UPDATE orders SET status = 'paid', tx_hash = ?, payer = ?, late = ?, paid_at = ? WHERE id = ? AND status = 'waiting'")
       .run(txHash, payer, late ? 1 : 0, paidAt, orderId)
   }
 
-  setOrderStatus(orderId: number, status: OrderStatus) {
+  async setOrderStatus(orderId: number, status: OrderStatus) {
     this.db.prepare('UPDATE orders SET status = ? WHERE id = ?').run(status, orderId)
   }
 
   // ---------- payments ----------
 
-  hasPayment(txHash: string): boolean {
+  async hasPayment(txHash: string): Promise<boolean> {
     return !!this.db.prepare('SELECT 1 FROM payments WHERE tx_hash = ?').get(txHash)
   }
 
-  recordPayment(p: PaymentRow) {
-    this.db
+  async recordPayment(p: PaymentRow): Promise<boolean> {
+    const r = this.db
       .prepare('INSERT OR IGNORE INTO payments (tx_hash, seller_id, amount_nano, comment, from_addr, utime, result, order_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(p.txHash, p.sellerId, p.amountNano.toString(), p.comment, p.from, p.utime, p.result, p.orderId)
+    return Number(r.changes) > 0
   }
 
-  recentPayments(sellerId: number, limit = 10): PaymentRow[] {
+  async recentPayments(sellerId: number, limit = 10): Promise<PaymentRow[]> {
     return (this.db.prepare('SELECT * FROM payments WHERE seller_id = ? ORDER BY utime DESC LIMIT ?').all(sellerId, limit) as any[]).map(toPayment)
   }
 
   /** Totals for "today" in the seller's local day, given the start of that day (unix seconds). */
-  todayTotals(sellerId: number, dayStart: number) {
+  async todayTotals(sellerId: number, dayStart: number) {
     const rows = this.db.prepare('SELECT amount_nano, result FROM payments WHERE seller_id = ? AND utime >= ?').all(sellerId, dayStart) as any[]
     let total = 0n
     let paidCount = 0
@@ -335,15 +315,77 @@ export class Store {
 
   // ---------- watcher cursor ----------
 
-  getCursor(sellerId: number): { lt: string; hash: string } | null {
+  async getCursor(sellerId: number): Promise<{ lt: string; hash: string } | null> {
     const r = this.db.prepare('SELECT lt, hash FROM cursors WHERE seller_id = ?').get(sellerId) as any
     return r ? { lt: r.lt, hash: r.hash } : null
   }
 
-  setCursor(sellerId: number, lt: string, hash: string) {
+  async setCursor(sellerId: number, lt: string, hash: string) {
     this.db
       .prepare('INSERT INTO cursors (seller_id, lt, hash) VALUES (?, ?, ?) ON CONFLICT(seller_id) DO UPDATE SET lt = excluded.lt, hash = excluded.hash')
       .run(sellerId, lt, hash)
+  }
+
+  // ---------- live events ----------
+
+  async appendEvent(sellerId: number, payload: EventPayload): Promise<number> {
+    const r = this.db.prepare('INSERT INTO events (seller_id, payload, created_at) VALUES (?, ?, ?)').run(sellerId, JSON.stringify(payload), now())
+    // Keep the table small: events are only needed for live delivery.
+    if (Number(r.lastInsertRowid) % 500 === 0) this.db.prepare('DELETE FROM events WHERE created_at < ?').run(now() - 86400)
+    return Number(r.lastInsertRowid)
+  }
+
+  async eventsSince(sellerId: number, afterId: number, limit = 50): Promise<StoredEvent[]> {
+    return (this.db.prepare('SELECT id, seller_id, payload FROM events WHERE seller_id = ? AND id > ? ORDER BY id LIMIT ?').all(sellerId, afterId, limit) as any[]).map(r => ({
+      id: Number(r.id),
+      sellerId: r.seller_id,
+      payload: JSON.parse(r.payload),
+    }))
+  }
+
+  async latestEventId(sellerId: number): Promise<number> {
+    const r = this.db.prepare('SELECT MAX(id) AS id FROM events WHERE seller_id = ?').get(sellerId) as any
+    return Number(r?.id ?? 0)
+  }
+
+  // ---------- one-shot confirmations ----------
+
+  async putPending(id: string, sellerId: number, action: PendingAction, ttlSec: number) {
+    this.db.prepare('DELETE FROM pending WHERE expires_at < ?').run(now())
+    this.db.prepare('INSERT INTO pending (id, seller_id, action, expires_at) VALUES (?, ?, ?, ?)').run(id, sellerId, JSON.stringify(action), now() + ttlSec)
+  }
+
+  async takePending(id: string, sellerId: number): Promise<PendingAction | null> {
+    const r = this.db.prepare('DELETE FROM pending WHERE id = ? RETURNING seller_id, action, expires_at').get(id) as any
+    if (!r || r.seller_id !== sellerId || r.expires_at < now()) return null
+    return JSON.parse(r.action)
+  }
+
+  async dropPending(id: string) {
+    this.db.prepare('DELETE FROM pending WHERE id = ?').run(id)
+  }
+
+  // ---------- telegram conversation state ----------
+
+  async getBotStep(chatId: number): Promise<BotStep | null> {
+    const r = this.db.prepare('SELECT step FROM bot_state WHERE chat_id = ? AND updated_at > ?').get(chatId, now() - 3600) as any
+    return r ? JSON.parse(r.step) : null
+  }
+
+  async setBotStep(chatId: number, step: BotStep | null): Promise<void> {
+    if (!step) this.db.prepare('DELETE FROM bot_state WHERE chat_id = ?').run(chatId)
+    else
+      this.db
+        .prepare('INSERT INTO bot_state (chat_id, step, updated_at) VALUES (?, ?, ?) ON CONFLICT(chat_id) DO UPDATE SET step = excluded.step, updated_at = excluded.updated_at')
+        .run(chatId, JSON.stringify(step), now())
+  }
+
+  async migrate() {
+    /* schema is created in the constructor */
+  }
+
+  async close() {
+    this.db.close()
   }
 }
 

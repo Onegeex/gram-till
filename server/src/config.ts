@@ -8,10 +8,20 @@ function env(name: string, fallback?: string): string | undefined {
 const network = (env('NETWORK', 'testnet') as Network)
 if (network !== 'testnet' && network !== 'mainnet') throw new Error(`NETWORK must be "testnet" or "mainnet", got "${network}"`)
 
+const onVercel = !!process.env.VERCEL
+const vercelUrl = env('VERCEL_PROJECT_PRODUCTION_URL') // e.g. gram-till.vercel.app
+
 export const config = {
   port: Number(env('PORT', '8787')),
   /** Public base URL of this server, used in payment-page links sent over Telegram. */
-  publicUrl: (env('PUBLIC_URL', `http://localhost:${env('PORT', '8787')}`) as string).replace(/\/$/, ''),
+  publicUrl: (env('PUBLIC_URL') ?? (vercelUrl ? `https://${vercelUrl}` : `http://localhost:${env('PORT', '8787')}`)).replace(/\/$/, ''),
+  /** Postgres (Vercel's Neon integration sets DATABASE_URL / POSTGRES_URL). Unset = local SQLite. */
+  databaseUrl: env('DATABASE_URL') ?? env('POSTGRES_URL'),
+  /** Random string; Telegram sends it back on every webhook call so we know it's really Telegram. */
+  telegramWebhookSecret: env('TELEGRAM_WEBHOOK_SECRET'),
+  /** End SSE streams before the serverless time limit (EventSource reconnects seamlessly). 0 = never. */
+  sseMaxSec: Number(env('SSE_MAX_SEC', onVercel ? '270' : '0')),
+  onVercel,
   /**
    * testnet (default): full demo with test GRAM.
    * mainnet: watch a real Gram Wallet. Gram Till is read-only either way: it never

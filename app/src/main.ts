@@ -5,7 +5,9 @@ import { TillController } from './controller'
 import { GlassesDisplay, toGestures } from './display'
 import { unpairedCard } from './format'
 
-const DEFAULT_SERVER = (import.meta.env.VITE_SERVER_URL as string | undefined) ?? 'http://localhost:8787'
+// Hosted (https, e.g. on Vercel) the API is on the same origin; in local dev it's the server on :8787.
+const DEFAULT_SERVER =
+  (import.meta.env.VITE_SERVER_URL as string | undefined) ?? (location.protocol === 'https:' ? location.origin : 'http://localhost:8787')
 const K_SERVER = 'gt_server'
 const K_TOKEN = 'gt_token'
 

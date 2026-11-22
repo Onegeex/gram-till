@@ -3,9 +3,9 @@ import { Address, beginCell } from '@ton/core'
 import { extractOrderCode, fromNano, newOrderCode, toNano } from '../src/money.js'
 import { matchPayment, type MatchableOrder } from '../src/matcher.js'
 import { extractPayment, parseComment, tonTransferLink, type TxLike } from '../src/ton.js'
-import { Store } from '../src/db.js'
-import { TillBus, processIncoming, type TillEvent } from '../src/processor.js'
+import { processIncoming } from '../src/processor.js'
 import { Watcher, type FetchTxs } from '../src/watcher.js'
+import { makeStore } from './helpers.js'
 
 const SELLER = 'EQD2NmD_lH5f5u1Kj3KfGyTvhZSX0Eg6qp2a5IQUKXxOG21n'
 const PAYER = Address.parse('UQDYzZmfsrGzhObKJUw4gzdeIxEai3jAFbiGKGwxvxHinf4K')
@@ -97,52 +97,54 @@ describe('ton parsing', () => {
   })
 })
 
-function setup() {
-  const store = new Store()
-  const bus = new TillBus()
-  const events: TillEvent[] = []
-  bus.subscribe(e => events.push(e))
-  const seller = store.createSeller('Mama T', SELLER, Address.parse(SELLER).toRawString(), 1)
-  return { store, bus, events, seller }
+async function setup() {
+  const store = await makeStore()
+  const seller = await store.createSeller('Corner Coffee', SELLER, Address.parse(SELLER).toRawString(), 1)
+  const events = async () => (await store.eventsSince(seller.id, 0)).map(e => e.payload)
+  return { store, events, seller }
 }
 
 describe('processIncoming', () => {
-  it('marks the order paid, records the payment once, and emits one event', () => {
-    const { store, bus, events, seller } = setup()
-    const order = store.createOrder({ sellerId: seller.id, label: 'Tunde', amountNano: toNano('15') })
+  it('marks the order paid, records the payment once, and emits one event', async () => {
+    const { store, events, seller } = await setup()
+    const order = await store.createOrder({ sellerId: seller.id, label: 'Maria', amountNano: toNano('15') })
     const p = { txHash: 'abc', from: 'x', amountNano: toNano('15'), comment: order.code, utime: Math.floor(Date.now() / 1000) }
-    expect(processIncoming(store, bus, seller.id, p)).toBe('paid')
-    expect(processIncoming(store, bus, seller.id, p)).toBe('duplicate_tx')
-    expect(store.getOrder(order.id)!.status).toBe('paid')
-    expect(events.filter(e => e.type === 'payment')).toHaveLength(1)
-    const totals = store.todayTotals(seller.id, 0)
+    expect((await processIncoming(store, seller.id, p))?.result).toBe('paid')
+    expect(await processIncoming(store, seller.id, p)).toBeNull() // same tx again
+    expect((await store.getOrder(order.id))!.status).toBe('paid')
+    expect((await events()).filter(e => e.type === 'payment')).toHaveLength(1)
+    const totals = await store.todayTotals(seller.id, 0)
     expect(totals).toMatchObject({ totalNano: toNano('15'), paidCount: 1, waiting: 0 })
+    await store.close()
   })
 })
 
 describe('Watcher', () => {
   it('ignores history on first sight, then processes only new transfers in order', async () => {
-    const { store, bus, events, seller } = setup()
-    const order = store.createOrder({ sellerId: seller.id, label: 'Table 4', amountNano: toNano('12') })
+    const { store, events, seller } = await setup()
+    const order = await store.createOrder({ sellerId: seller.id, label: 'Table 4', amountNano: toNano('12') })
     const chain: TxLike[] = [fakeTx({ amount: toNano('99'), comment: 'old' })] // newest-first list
     const fetchTxs: FetchTxs = async (_a, { limit, lt }) => {
       const start = lt ? chain.findIndex(t => t.lt.toString() === lt) : 0
       return chain.slice(start, start + limit)
     }
-    const w = new Watcher(store, bus, fetchTxs, 'testnet', { pageSize: 2 })
+    const notified: string[] = []
+    const w = new Watcher(store, fetchTxs, 'testnet', { pageSize: 2, onPayment: (_id, p) => void notified.push(p.result) })
 
     await w.tick() // first sight: sets cursor only
-    expect(events).toHaveLength(0)
+    expect(await events()).toHaveLength(0)
 
     chain.unshift(fakeTx({ amount: toNano('1'), comment: 'tip' }))
     chain.unshift(fakeTx({ amount: toNano('2'), out: 1 })) // bounced: skipped
     chain.unshift(fakeTx({ amount: toNano('12'), comment: order.code }))
     await w.tick()
-    const kinds = events.map(e => (e.type === 'payment' ? e.result : e.type))
+    const kinds = (await events()).map(e => (e.type === 'payment' ? e.result : e.type))
     expect(kinds).toEqual(['unmatched', 'paid']) // oldest first, across 2 pages
-    expect(store.getOrder(order.id)!.status).toBe('paid')
+    expect(notified).toEqual(['unmatched', 'paid']) // receipts/alerts hook
+    expect((await store.getOrder(order.id))!.status).toBe('paid')
 
     await w.tick() // nothing new
-    expect(events).toHaveLength(2)
+    expect(await events()).toHaveLength(2)
+    await store.close()
   })
 })

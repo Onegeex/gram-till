@@ -1,0 +1,35 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "web": {
+      "root": "app/",
+      "framework": "vite",
+      "buildCommand": "npm run build:web",
+      "outputDirectory": "dist"
+    },
+    "api": {
+      "root": "server/",
+      "framework": "hono",
+      "entrypoint": "src/app.ts"
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": { "service": "api" } },
+    { "source": "/pay/(.*)", "destination": { "service": "api" } },
+    { "source": "/telegram/(.*)", "destination": { "service": "api" } },
+    { "source": "/dev/(.*)", "destination": { "service": "api" } },
+    { "source": "/health", "destination": { "service": "api" } },
+    { "source": "/tonconnect-manifest.json", "destination": { "service": "api" } },
+    { "source": "/(.*)", "destination": { "service": "web" } }
+  ],
+  "daemons": {
+    "watcher": {
+      "root": "server/",
+      "entrypoint": "Dockerfile",
+      "instances": { "iad1": 1 },
+      "resources": { "requests": { "memory": "1Gi" } },
+      "livenessProbe": { "httpGet": { "port": 8080, "path": "/health" }, "initialDelaySeconds": 30, "periodSeconds": 30 },
+      "terminationGracePeriodSeconds": 20
+    }
+  }
+}

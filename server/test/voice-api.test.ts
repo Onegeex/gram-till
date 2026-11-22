@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Address } from '@ton/core'
 import { buildApi } from '../src/api.js'
-import { Store } from '../src/db.js'
 import { toNano } from '../src/money.js'
-import { TillBus } from '../src/processor.js'
+import { makeStore } from './helpers.js'
 import { TillService, nullNotifier } from '../src/service.js'
 
 const ADDR = 'EQD2NmD_lH5f5u1Kj3KfGyTvhZSX0Eg6qp2a5IQUKXxOG21n'
@@ -28,20 +27,19 @@ function mockWhisper(answers: { transcriptions: Record<string, string>; translat
 afterEach(() => vi.unstubAllGlobals())
 
 async function setup(language: string) {
-  const store = new Store()
-  const bus = new TillBus()
-  const service = new TillService(store, bus, nullNotifier, { network: 'testnet', publicUrl: 'https://till.example', timezone: 'UTC', orderTtlMinutes: 30, maxChargeGram: 500 })
+  const store = await makeStore()
+  const service = new TillService(store, nullNotifier, { network: 'testnet', publicUrl: 'https://till.example', timezone: 'UTC', orderTtlMinutes: 30, maxChargeGram: 500 })
   const app = buildApi({
-    store, bus, service, publicUrl: 'https://till.example', devSimulate: false,
+    store, service, publicUrl: 'https://till.example', devSimulate: false,
     stt: { apiKey: 'k', baseUrl: 'https://stt.test', model: 'whisper-large-v3-turbo', translateModel: 'whisper-large-v3' },
   })
-  const seller = store.createSeller('Padaria Central', ADDR, Address.parse(ADDR).toRawString(), 1)
-  store.updateSellerLanguage(seller.id, language)
-  store.upsertCustomer(seller.id, 'João', null)
-  store.upsertCustomer(seller.id, 'Maria', null)
-  store.setMenuItem(seller.id, 'café com leite', toNano('3'))
-  store.setMenuItem(seller.id, 'latte', toNano('4'))
-  const code = store.createPairCode(seller.id)
+  const seller = await store.createSeller('Padaria Central', ADDR, Address.parse(ADDR).toRawString(), 1)
+  await store.updateSellerLanguage(seller.id, language)
+  await store.upsertCustomer(seller.id, 'João', null)
+  await store.upsertCustomer(seller.id, 'Maria', null)
+  await store.setMenuItem(seller.id, 'café com leite', toNano('3'))
+  await store.setMenuItem(seller.id, 'latte', toNano('4'))
+  const code = await store.createPairCode(seller.id)
   const { token } = (await (await app.request('/api/pair', { method: 'POST', body: JSON.stringify({ code }), headers: { 'Content-Type': 'application/json' } })).json()) as any
   const voice = async () =>
     (await (await app.request('/api/voice', { method: 'POST', body: new Uint8Array(32000), headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' } })).json()) as any

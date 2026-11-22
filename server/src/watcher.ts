@@ -1,7 +1,6 @@
 import { Address } from '@ton/core'
-import type { Store } from './db.js'
-import type { TillBus } from './processor.js'
-import { processIncoming } from './processor.js'
+import type { TillStore } from './store/index.js'
+import { processIncoming, type PaymentListener } from './processor.js'
 import { extractPayment, type Network, type TxLike } from './ton.js'
 
 /** Fetch transactions newest-first; optionally starting below (lt, hash). Injected so tests need no network. */
@@ -24,11 +23,10 @@ export class Watcher {
   private failures = 0
 
   constructor(
-    private store: Store,
-    private bus: TillBus,
+    private store: TillStore,
     private fetchTxs: FetchTxs,
     private network: Network,
-    private opts: { intervalMs?: number; pageSize?: number; log?: (...a: unknown[]) => void } = {},
+    private opts: { intervalMs?: number; pageSize?: number; log?: (...a: unknown[]) => void; onPayment?: PaymentListener; onTick?: () => void } = {},
   ) {}
 
   start() {
@@ -52,11 +50,12 @@ export class Watcher {
     if (this.busy) return
     this.busy = true
     try {
-      for (const seller of this.store.listSellers()) {
+      for (const seller of await this.store.listSellers()) {
         if (!seller.address) continue
         await this.pollSeller(seller.id, seller.address)
       }
       this.failures = 0
+      this.opts.onTick?.()
     } catch (err) {
       this.failures = Math.min(this.failures + 1, 4)
       this.opts.log?.('[watcher] poll failed:', (err as Error).message)
@@ -67,15 +66,15 @@ export class Watcher {
 
   async pollSeller(sellerId: number, address: string) {
     const limit = this.opts.pageSize ?? 20
-    const cursor = this.store.getCursor(sellerId)
+    const cursor = await this.store.getCursor(sellerId)
 
     if (!cursor) {
       const latest = await this.fetchTxs(address, { limit: 1 })
       if (latest[0]) {
         const id = txId(latest[0])
-        this.store.setCursor(sellerId, id.lt, id.hash)
+        await this.store.setCursor(sellerId, id.lt, id.hash)
       } else {
-        this.store.setCursor(sellerId, '0', '') // empty wallet: everything from now on is new
+        await this.store.setCursor(sellerId, '0', '') // empty wallet: everything from now on is new
       }
       return
     }
@@ -98,11 +97,12 @@ export class Watcher {
     for (const tx of fresh.reverse()) {
       const payment = extractPayment(tx, this.network)
       if (payment) {
-        const kind = processIncoming(this.store, this.bus, sellerId, payment)
-        this.opts.log?.(`[watcher] seller ${sellerId}: ${kind} +${payment.amountNano} "${payment.comment ?? ''}"`)
+        const done = await processIncoming(this.store, sellerId, payment)
+        this.opts.log?.(`[watcher] seller ${sellerId}: ${done?.result ?? 'duplicate'} +${payment.amountNano} "${payment.comment ?? ''}"`)
+        if (done) await Promise.resolve(this.opts.onPayment?.(sellerId, done)).catch(err => this.opts.log?.('[watcher] notify failed:', (err as Error).message))
       }
       const id = txId(tx)
-      this.store.setCursor(sellerId, id.lt, id.hash)
+      await this.store.setCursor(sellerId, id.lt, id.hash)
     }
   }
 }

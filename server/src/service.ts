@@ -1,6 +1,5 @@
-import type { Customer, Order, Seller, Store } from './db.js'
+import type { Customer, Order, Seller, TillStore } from './store/index.js'
 import { fromNano, toNano } from './money.js'
-import type { TillBus } from './processor.js'
 import { tonTransferLink, tonkeeperLink, type Network } from './ton.js'
 import type { Command } from './voice.js'
 
@@ -49,19 +48,28 @@ export function startOfLocalDay(timeZone: string, nowSec = Math.floor(Date.now()
 }
 
 export class TillService {
+  get network() {
+    return this.cfg.network
+  }
+
   constructor(
-    private store: Store,
-    private bus: TillBus,
+    private store: TillStore,
     public notifier: Notifier,
     private cfg: { network: Network; publicUrl: string; timezone: string; orderTtlMinutes: number; maxChargeGram: number },
   ) {}
 
   // ---------- read ----------
 
-  snapshot(seller: Seller) {
+  async snapshot(seller: Seller) {
     const now = Math.floor(Date.now() / 1000)
-    const totals = this.store.todayTotals(seller.id, startOfLocalDay(seller.timezone ?? this.cfg.timezone, now))
-    const labelFor = (orderId: number | null) => (orderId ? this.store.getOrder(orderId)?.label ?? null : null)
+    const [totals, waiting, recent] = await Promise.all([
+      this.store.todayTotals(seller.id, startOfLocalDay(seller.timezone ?? this.cfg.timezone, now)),
+      this.store.waitingOrders(seller.id),
+      this.store.recentPayments(seller.id, 8),
+    ])
+    const labels = new Map<number, string>()
+    for (const p of recent) if (p.orderId && !labels.has(p.orderId)) labels.set(p.orderId, (await this.store.getOrder(p.orderId))?.label ?? '')
+    const labelFor = (orderId: number | null) => (orderId ? labels.get(orderId) || null : null)
     return {
       seller: { name: seller.name, address: seller.address, network: this.cfg.network },
       today: {
@@ -70,8 +78,8 @@ export class TillService {
         unmatched: totals.unmatched,
         waiting: totals.waiting,
       },
-      waiting: this.store.waitingOrders(seller.id).slice(0, 20).map(o => this.orderView(o, now)),
-      recent: this.store.recentPayments(seller.id, 8).map(p => ({
+      waiting: waiting.slice(0, 20).map(o => this.orderView(o, now)),
+      recent: recent.map(p => ({
         amount: fromNano(p.amountNano),
         result: p.result,
         label: labelFor(p.orderId),
@@ -109,7 +117,7 @@ export class TillService {
   // ---------- voice / glasses commands ----------
 
   /** Turn a parsed charge command into a concrete preview the seller confirms with one tap. */
-  previewCharge(seller: Seller, cmd: Extract<Command, { kind: 'charge' }>): ChargePreview | ServiceError {
+  async previewCharge(seller: Seller, cmd: Extract<Command, { kind: 'charge' }>): Promise<ChargePreview | ServiceError> {
     let amountNano: bigint
     if (cmd.amount !== null) {
       try {
@@ -118,13 +126,13 @@ export class TillService {
         return { error: 'Amount not understood' }
       }
     } else {
-      const priced = this.store.listMenu(seller.id).find(m => m.item === (cmd.item ?? '').toLowerCase())
+      const priced = (await this.store.listMenu(seller.id)).find(m => m.item === (cmd.item ?? '').toLowerCase())
       if (!priced) return { error: `No price for "${cmd.item}". Add it in Telegram: /menu ${cmd.item ?? 'item'} 12` }
       amountNano = priced.amountNano * BigInt(cmd.qty)
     }
     if (amountNano <= 0n) return { error: 'Amount must be above zero' }
     if (amountNano > toNano(String(this.cfg.maxChargeGram))) return { error: `Over the ${this.cfg.maxChargeGram} GRAM limit` }
-    const customer = cmd.label && !/^Table \d+$/.test(cmd.label) ? this.store.findCustomer(seller.id, cmd.label) : null
+    const customer = cmd.label && !/^Table \d+$/.test(cmd.label) ? await this.store.findCustomer(seller.id, cmd.label) : null
     const item = cmd.item ? (cmd.qty > 1 ? `${cmd.qty}× ${cmd.item}` : cmd.item) : null
     return {
       label: customer?.name ?? cmd.label ?? 'Walk-in',
@@ -137,15 +145,15 @@ export class TillService {
   }
 
   /** Repeat the last charge (same label, amount, item) as a new order preview. */
-  previewRepeat(seller: Seller): ChargePreview | ServiceError {
-    const last = this.store.lastOrder(seller.id)
+  async previewRepeat(seller: Seller): Promise<ChargePreview | ServiceError> {
+    const last = await this.store.lastOrder(seller.id)
     if (!last) return { error: 'Nothing to repeat yet' }
-    const customer = last.customerId ? this.store.getCustomer(last.customerId) : null
+    const customer = last.customerId ? await this.store.getCustomer(last.customerId) : null
     return { label: last.label, amountNano: last.amountNano, item: last.item, qty: 1, customer, reachable: !!customer?.tgChatId }
   }
 
   async charge(seller: Seller, p: ChargePreview) {
-    const order = this.store.createOrder({
+    const order = await this.store.createOrder({
       sellerId: seller.id,
       label: p.label,
       amountNano: p.amountNano,
@@ -153,25 +161,25 @@ export class TillService {
       customerId: p.customer?.id ?? null,
       ttlSec: this.cfg.orderTtlMinutes * 60,
     })
-    this.bus.publish({ type: 'order', sellerId: seller.id, order, change: 'created' })
+    await this.store.appendEvent(seller.id, { type: 'order', change: 'created', orderId: order.id })
     const delivered = await this.notifier.requestPayment(seller, order, p.customer, false).catch(() => false)
     return { order, delivered, links: this.payLinks(seller, order) }
   }
 
-  findWaiting(seller: Seller, target: string | 'last'): Order | null {
-    const waiting = this.store.waitingOrders(seller.id)
+  async findWaiting(seller: Seller, target: string | 'last'): Promise<Order | null> {
+    const waiting = await this.store.waitingOrders(seller.id)
     if (target === 'last') return waiting[0] ?? null
     const t = target.toLowerCase()
     return waiting.find(o => o.label.toLowerCase() === t || o.code.toLowerCase() === t) ?? null
   }
 
-  cancel(seller: Seller, orderId: number): Order | ServiceError {
-    const o = this.store.getOrder(orderId)
+  async cancel(seller: Seller, orderId: number): Promise<Order | ServiceError> {
+    const o = await this.store.getOrder(orderId)
     if (!o || o.sellerId !== seller.id) return { error: 'Order not found' }
     if (o.status !== 'waiting') return { error: `Order is already ${o.status}` }
-    this.store.setOrderStatus(o.id, 'cancelled')
-    const updated = this.store.getOrder(o.id)!
-    this.bus.publish({ type: 'order', sellerId: seller.id, order: updated, change: 'cancelled' })
+    await this.store.setOrderStatus(o.id, 'cancelled')
+    const updated = (await this.store.getOrder(o.id))!
+    await this.store.appendEvent(seller.id, { type: 'order', change: 'cancelled', orderId: o.id })
     return updated
   }
 
@@ -179,23 +187,23 @@ export class TillService {
     let reminded = 0
     let unreachable = 0
     for (const id of orderIds) {
-      const o = this.store.getOrder(id)
+      const o = await this.store.getOrder(id)
       if (!o || o.sellerId !== seller.id || o.status !== 'waiting') continue
-      const customer = o.customerId ? this.store.getCustomer(o.customerId) : null
+      const customer = o.customerId ? await this.store.getCustomer(o.customerId) : null
       const ok = await this.notifier.requestPayment(seller, o, customer, true).catch(() => false)
       if (ok) {
         reminded++
-        this.bus.publish({ type: 'order', sellerId: seller.id, order: o, change: 'reminded' })
+        await this.store.appendEvent(seller.id, { type: 'order', change: 'reminded', orderId: o.id })
       } else unreachable++
     }
     return { reminded, unreachable }
   }
 
   /** Data for the customer-facing pay page. Never exposes other orders or customer data. */
-  payInfo(code: string) {
-    const order = this.store.getOrderByCode(code)
+  async payInfo(code: string) {
+    const order = await this.store.getOrderByCode(code)
     if (!order) return null
-    const seller = this.store.getSeller(order.sellerId)!
+    const seller = (await this.store.getSeller(order.sellerId))!
     const now = Math.floor(Date.now() / 1000)
     return {
       shop: seller.name,
