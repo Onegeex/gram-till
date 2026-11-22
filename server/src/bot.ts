@@ -4,6 +4,7 @@ import type { Customer, Order, Seller, Store } from './db.js'
 import { fromNano, toNano } from './money.js'
 import type { TillBus } from './processor.js'
 import { isError, isValidTimezone, type Notifier, type TillService } from './service.js'
+import { WHISPER_LANGUAGES } from './stt.js'
 import { friendlyAddress, isValidAddress, rawAddress, type Network } from './ton.js'
 import { parseCommand } from './voice.js'
 
@@ -27,6 +28,7 @@ const HELP = `*Gram Till*: a hands-free till for your Telegram shop, on Even G2 
 /name <shop name>: rename your shop
 /menu latte 4: set a menu price (/menu to list, /menu remove latte)
 /timezone Europe/Berlin: your local time zone (for "today" totals)
+/language es: the language you speak commands in (default en)
 /link: your shop link and counter QR for customers
 
 *Use*
@@ -108,6 +110,19 @@ export async function startBot(d: BotDeps): Promise<Notifier> {
     if (!isValidTimezone(tz)) return ctx.reply('Unknown time zone. Examples: Europe/London, America/Sao_Paulo, Asia/Dubai, Asia/Tokyo')
     d.store.updateSellerTimezone(seller.id, tz)
     return ctx.reply(`✅ "Today" now follows ${tz}`)
+  })
+
+  bot.command('language', async ctx => {
+    const seller = sellerOf(ctx)
+    if (!seller) return ctx.reply('Send /start to set up your shop first.')
+    const code = (ctx.match ?? '').trim().toLowerCase()
+    if (!code)
+      return ctx.reply(
+        `Your glasses listen for commands in: ${seller.language}\nChange it with a language code, e.g. /language es (Spanish), /language pt, /language fr, /language de, /language tr, /language id, /language ar, /language ja.\nSay commands naturally, e.g. "cobra a María doce". Amounts are always in GRAM.`,
+      )
+    if (!WHISPER_LANGUAGES.has(code)) return ctx.reply('Unknown language code. Use a 2-letter code like es, pt, fr, de, it, tr, id, ar, hi, ja, zh, sw, yo.')
+    d.store.updateSellerLanguage(seller.id, code)
+    return ctx.reply(`✅ Voice commands: ${code}${code === 'en' ? '' : ' (translated to English for the till; names and menu words are kept as you say them)'}`)
   })
 
   bot.command('pair', async ctx => {
@@ -218,7 +233,7 @@ export async function startBot(d: BotDeps): Promise<Notifier> {
     if (!isValidAddress(text)) return ctx.reply("That doesn't look like a TON address. Try again.")
     steps.delete(ctx.chat.id)
     const seller = d.store.createSeller(st.name, friendlyAddress(text, d.network), rawAddress(text), ctx.chat.id)
-    await ctx.reply(`✅ ${seller.name} is ready. Watching \`${seller.address}\`${net}.\n\nNext: /timezone for your local day, /link for your counter QR, /menu to add prices, /pair to connect your glasses.`, {
+    await ctx.reply(`✅ ${seller.name} is ready. Watching \`${seller.address}\`${net}.\n\nNext: /timezone for your local day, /language if you won't speak English to the glasses, /link for your counter QR, /menu to add prices, /pair to connect your glasses.`, {
       parse_mode: 'Markdown',
     })
   })
@@ -289,6 +304,7 @@ export async function startBot(d: BotDeps): Promise<Notifier> {
     { command: 'today', description: "Today's total" },
     { command: 'wallet', description: 'Wallet you get paid into' },
     { command: 'timezone', description: 'Your local time zone' },
+    { command: 'language', description: 'Language for voice commands' },
     { command: 'help', description: 'Help' },
   ])
   bot.catch(err => d.log('[bot] error:', err.message))

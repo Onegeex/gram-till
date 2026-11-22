@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseCommand, wordsToNumbers, fuzzyPick } from '../src/voice.js'
+import { parseCommand, wordsToNumbers, fuzzyPick, reconcileWithOriginal } from '../src/voice.js'
 
 const ctx = { menu: ['jollof', 'fried rice', 'suya', 'zobo'], customers: ['Tunde', 'Bisi Adeyemi', 'Chidi'] }
 const p = (t: string) => parseCommand(t, ctx)
@@ -100,5 +100,75 @@ describe('fuzzyPick', () => {
   it('matches close names only', () => {
     expect(fuzzyPick('jolof', ['jollof', 'suya'])).toBe('jollof')
     expect(fuzzyPick('pizza', ['jollof', 'suya'])).toBeNull()
+  })
+})
+
+describe('worldwide: typed commands in other languages', () => {
+  const intl = { menu: ['latte', 'espresso', 'cafe com leite', 'croissant', 'pound cake'], customers: ['María', 'Kenji', 'Aisha', 'Oleg', 'José'] }
+  const q = (t: string) => parseCommand(t, intl)
+  it.each([
+    ['cobra María 12', { label: 'María', amount: 12 }], // Spanish
+    ['cobrar mesa 4 dos latte', { label: 'Table 4', item: 'latte', qty: 2 }], // Spanish
+    ['cobra José 3 cafe com leite', { label: 'José', item: 'cafe com leite', qty: 3 }], // Portuguese
+    ['encaisse Aisha 7,50', { label: 'Aisha', amount: 7.5 }], // French, decimal comma
+    ['kassiere Tisch 2 zwei espresso', { label: 'Table 2', item: 'espresso', qty: 2 }], // German
+    ['addebita Kenji 9', { label: 'Kenji', amount: 9 }], // Italian
+    ['tahsil Oleg 15', { label: 'Oleg', amount: 15 }], // Turkish
+    ['tagih meja 3 untuk dua croissant', { label: 'Table 3', item: 'croissant', qty: 2 }], // Indonesian
+  ])('%s', (text, expected) => {
+    expect(q(text)).toMatchObject({ kind: 'charge', ...expected })
+  })
+  it('remind / cancel / total in other languages', () => {
+    expect(q('recuerda a todos')).toEqual({ kind: 'remind', target: 'all' })
+    expect(q('rappelle Aisha')).toEqual({ kind: 'remind', target: 'Aisha' })
+    expect(q('cancela el último')).toEqual({ kind: 'cancel', target: 'last' })
+    expect(q('annuler dernier')).toEqual({ kind: 'cancel', target: 'last' })
+    expect(q('total de hoy')).toEqual({ kind: 'total' })
+  })
+  it('keeps non-Latin names', () => {
+    expect(parseCommand('charge Олег 5', intl)).toMatchObject({ label: 'Олег', amount: 5 })
+    expect(parseCommand('charge 健二 5', intl)).toMatchObject({ label: '健二', amount: 5 })
+  })
+  it('matches names regardless of accents', () => {
+    expect(q('charge Maria 4')).toMatchObject({ label: 'María' })
+    expect(q('charge jose 4')).toMatchObject({ label: 'José' })
+  })
+})
+
+describe('worldwide: amounts', () => {
+  it('spoken prices like "twelve fifty"', () => {
+    expect(p('charge Tunde twelve fifty')).toMatchObject({ amount: 12.5 })
+    expect(p('charge Tunde four ninety nine')).toMatchObject({ amount: 4.99 })
+    expect(p('charge twenty five')).toMatchObject({ amount: 25 }) // still a normal number
+  })
+  it('does not merge a table number with the amount', () => {
+    expect(p('charge table four twenty')).toMatchObject({ label: 'Table 4', amount: 20 })
+    expect(p('charge table four, twenty')).toMatchObject({ label: 'Table 4', amount: 20 })
+  })
+  it('decimal comma and thousands separators', () => {
+    expect(p('charge Tunde 12,50')).toMatchObject({ amount: 12.5 })
+    expect(p('charge Tunde 1,000')).toMatchObject({ amount: 1000 })
+  })
+  it('refuses fiat amounts instead of charging them as GRAM', () => {
+    for (const t of ['charge Tunde 12 dollars', 'charge Tunde $12', 'charge Tunde €5', 'charge Tunde 500 naira', 'charge Tunde 20 euros', 'cobra María 10 pesos', 'charge Tunde 5 usdt']) {
+      expect(p(t)).toMatchObject({ kind: 'unknown', reason: 'fiat' })
+    }
+  })
+  it('a menu item containing a currency word is not refused', () => {
+    expect(parseCommand('charge Kenji two pound cake', { menu: ['pound cake'], customers: ['Kenji'] })).toMatchObject({ item: 'pound cake', qty: 2 })
+  })
+})
+
+describe('reconcileWithOriginal (spoken non-English)', () => {
+  const ctx = { menu: ['cafe com leite', 'pao de queijo'], customers: ['João', 'Ana'] }
+  it('recovers menu items and names lost in translation', () => {
+    // Said (pt): "Cobra o João dois café com leite" -> Whisper translation: "Charge John two coffees with milk"
+    const english = parseCommand('Charge John two coffees with milk', ctx)
+    const fixed = reconcileWithOriginal(english, 'Cobra o João dois café com leite', ctx)
+    expect(fixed).toMatchObject({ kind: 'charge', label: 'João', item: 'cafe com leite' })
+  })
+  it('keeps the parsed amount and table labels', () => {
+    const english = parseCommand('Charge table 3, 8', ctx)
+    expect(reconcileWithOriginal(english, 'Cobra mesa três, oito', ctx)).toMatchObject({ label: 'Table 3', amount: 8 })
   })
 })

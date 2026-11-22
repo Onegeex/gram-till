@@ -10,6 +10,7 @@ export interface Seller {
   addressRaw: string // 0:… form, used for comparisons
   tgChatId: number | null
   timezone: string | null // IANA zone, e.g. "Europe/Berlin"; null = server default
+  language: string // spoken-command language (ISO-639-1), default "en"
 }
 
 export interface Order extends MatchableOrder {
@@ -118,6 +119,7 @@ export class Store {
     // Migration: per-seller time zone (sellers can be anywhere).
     const cols = this.db.prepare('PRAGMA table_info(sellers)').all() as { name: string }[]
     if (!cols.some(c => c.name === 'timezone')) this.db.exec('ALTER TABLE sellers ADD COLUMN timezone TEXT')
+    if (!cols.some(c => c.name === 'language')) this.db.exec("ALTER TABLE sellers ADD COLUMN language TEXT NOT NULL DEFAULT 'en'")
   }
 
   // ---------- sellers ----------
@@ -136,6 +138,10 @@ export class Store {
 
   updateSellerTimezone(id: number, timezone: string) {
     this.db.prepare('UPDATE sellers SET timezone = ? WHERE id = ?').run(timezone, id)
+  }
+
+  updateSellerLanguage(id: number, language: string) {
+    this.db.prepare('UPDATE sellers SET language = ? WHERE id = ?').run(language, id)
   }
 
   updateSellerName(id: number, name: string) {
@@ -342,7 +348,7 @@ export class Store {
 }
 
 function toSeller(r: any): Seller {
-  return { id: r.id, name: r.name, address: r.address, addressRaw: r.address_raw, tgChatId: r.tg_chat_id ?? null, timezone: r.timezone ?? null }
+  return { id: r.id, name: r.name, address: r.address, addressRaw: r.address_raw, tgChatId: r.tg_chat_id ?? null, timezone: r.timezone ?? null, language: r.language ?? 'en' }
 }
 
 function toCustomer(r: any): Customer {

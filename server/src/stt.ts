@@ -30,21 +30,55 @@ export interface SttOptions {
   apiKey?: string
   baseUrl: string
   model: string
+  /** Model for translating other languages to English (Groq: whisper-large-v3; turbo can't translate). */
+  translateModel?: string
   /** Bias Whisper toward the words the seller actually uses. */
   prompt?: string
 }
 
-export async function transcribe(pcm: Uint8Array, opts: SttOptions): Promise<string> {
-  if (!opts.apiKey) throw new Error('Speech-to-text is not configured (set GROQ_API_KEY)')
-  if (pcm.byteLength < 16000) throw new Error('Too short: hold and speak for at least half a second')
+/** Languages Whisper can transcribe (ISO-639-1, plus a few Whisper-specific codes). */
+export const WHISPER_LANGUAGES = new Set(
+  ('en zh de es ru ko fr ja pt tr pl ca nl ar sv it id hi fi vi he uk el ms cs ro da hu ta no th ur hr bg lt la mi ml cy sk te fa lv bn sr az sl kn et mk br eu is hy ne mn bs kk sq sw gl mr pa si km sn yo so af oc ka be tg sd gu am yi lo uz fo ht ps tk nn mt sa lb my bo tl mg as tt haw ln ha ba jw su yue').split(' '),
+)
+
+export interface Heard {
+  /** What was said, in the seller's language. */
+  original: string
+  /** English text the grammar parses (same as original for English). */
+  english: string
+  language: string
+}
+
+/**
+ * English sellers: one fast transcription. Other languages: transcribe in that language
+ * (for names and menu words) and translate to English (for the grammar) in parallel.
+ * Telling Whisper the language matters for 1-3 second commands, where auto-detect is unreliable.
+ */
+export async function understandSpeech(pcm: Uint8Array, language: string, opts: SttOptions): Promise<Heard> {
+  if (language === 'en') {
+    const text = await transcribe(pcm, { ...opts, language: 'en' })
+    return { original: text, english: text, language }
+  }
+  const [original, english] = await Promise.all([
+    transcribe(pcm, { ...opts, language }),
+    transcribe(pcm, { ...opts, model: opts.translateModel ?? 'whisper-large-v3', translate: true }),
+  ])
+  return { original, english, language }
+}
+
+export async function transcribe(pcm: Uint8Array, opts: SttOptions & { language?: string; translate?: boolean }): Promise<string> {
+  if (!opts.apiKey) throw new Error('Voice needs GROQ_API_KEY on the server')
+  if (pcm.byteLength < 16000) throw new Error('Too short: speak for at least half a second')
   const form = new FormData()
   form.append('file', new Blob([pcmToWav(pcm)], { type: 'audio/wav' }), 'speech.wav')
   form.append('model', opts.model)
-  form.append('language', 'en')
+  // The translations endpoint only accepts "en"; transcriptions take the speaker's language.
+  if (opts.translate) form.append('language', 'en')
+  else if (opts.language) form.append('language', opts.language)
   form.append('response_format', 'json')
   form.append('temperature', '0')
   if (opts.prompt) form.append('prompt', opts.prompt)
-  const res = await fetch(`${opts.baseUrl}/audio/transcriptions`, {
+  const res = await fetch(`${opts.baseUrl}/audio/${opts.translate ? 'translations' : 'transcriptions'}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${opts.apiKey}` },
     body: form,

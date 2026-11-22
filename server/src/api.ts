@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { streamSSE } from 'hono/streaming'
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import type { Seller, Store } from './db.js'
@@ -10,8 +10,8 @@ import { fromNano } from './money.js'
 import { renderPayPage } from './paypage.js'
 import { TillBus, processIncoming } from './processor.js'
 import { isError, type ChargePreview, type TillService } from './service.js'
-import { transcribe, type SttOptions } from './stt.js'
-import { EXAMPLES, parseCommand } from './voice.js'
+import { pcmToWav, understandSpeech, type SttOptions } from './stt.js'
+import { EXAMPLES, parseCommand, reconcileWithOriginal } from './voice.js'
 
 type Pending =
   | { kind: 'charge'; sellerId: number; preview: ChargePreview; expires: number }
@@ -26,6 +26,7 @@ export interface ApiDeps {
   stt: SttOptions
   publicUrl: string
   devSimulate: boolean
+  voiceDebugDir?: string
   log?: (...a: unknown[]) => void
 }
 
@@ -103,10 +104,20 @@ export function buildApi(d: ApiDeps) {
   })
 
   // ---------- voice & text commands -> preview -> one-tap confirm ----------
-  async function interpret(c: Context<{ Variables: { seller: Seller } }>, transcript: string) {
+  /**
+   * @param transcript  text to parse (English, or a typed command in any supported language)
+   * @param original    for non-English speech: what was actually said, used to recover names/menu words
+   */
+  async function interpret(c: Context<{ Variables: { seller: Seller } }>, transcript: string, original?: string) {
     const seller = c.get('seller')
     const ctx = { menu: d.store.listMenu(seller.id).map(m => m.item), customers: d.store.listCustomers(seller.id).map(x => x.name) }
-    const cmd = parseCommand(transcript, ctx)
+    let cmd = parseCommand(transcript, ctx)
+    if (original && original !== transcript) {
+      // If the translation lost the verb, try the original words too (typed-language aliases).
+      if (cmd.kind === 'unknown' && !cmd.reason) cmd = parseCommand(original, ctx)
+      cmd = reconcileWithOriginal(cmd, original, ctx)
+    }
+    if (original) transcript = original
     sweep()
     switch (cmd.kind) {
       case 'charge':
@@ -153,18 +164,24 @@ export function buildApi(d: ApiDeps) {
         return c.json({ transcript, action: 'done', message: `Today ${s.today.total} GRAM · ${s.today.paid} paid · ${s.today.waiting} waiting` })
       }
       default:
+        if (cmd.reason === 'fiat') return c.json({ transcript, action: 'error', message: 'Say the amount in GRAM', examples: ['"Charge Maria twelve"'] })
         return c.json({ transcript, action: 'error', message: "Didn't catch that", examples: EXAMPLES })
     }
   }
 
   app.post('/api/voice', async c => {
     const pcm = new Uint8Array(await c.req.arrayBuffer())
+    if (d.voiceDebugDir) writeFileSync(join(d.voiceDebugDir, 'last-voice.wav'), pcmToWav(pcm))
     try {
       const seller = c.get('seller')
       const vocab = [...d.store.listCustomers(seller.id).map(x => x.name), ...d.store.listMenu(seller.id).map(m => m.item)].slice(0, 40)
-      const transcript = await transcribe(pcm, { ...d.stt, prompt: `Charge Maria twelve. Charge table four, two lattes. ${vocab.join(', ')}` })
-      if (!transcript) return c.json({ transcript: '', action: 'error', message: "Didn't hear anything", examples: EXAMPLES })
-      return interpret(c, transcript)
+      const heard = await understandSpeech(pcm, seller.language, {
+        ...d.stt,
+        // The prompt only biases spelling (names, menu words); keep it short and in the seller's terms.
+        prompt: seller.language === 'en' ? `Charge Maria twelve. Charge table four, two lattes. ${vocab.join(', ')}` : vocab.join(', '),
+      })
+      if (!heard.english && !heard.original) return c.json({ transcript: '', action: 'error', message: "Didn't hear anything", examples: EXAMPLES })
+      return interpret(c, heard.english || heard.original, heard.language === 'en' ? undefined : heard.original)
     } catch (err) {
       d.log?.('[voice]', (err as Error).message)
       return c.json({ transcript: '', action: 'error', message: (err as Error).message }, 200)

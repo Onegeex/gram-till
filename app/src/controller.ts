@@ -35,13 +35,65 @@ type Screen =
   | { kind: 'menu' }
   | { kind: 'waiting' }
   | { kind: 'order'; order: WaitingOrder }
-  | { kind: 'listening'; startedAt: number; chunks: Uint8Array[] }
+  | { kind: 'listening'; startedAt: number; chunks: Uint8Array[]; vad: Vad }
   | { kind: 'thinking'; transcript?: string }
   | { kind: 'confirm'; confirm: Confirm }
   | { kind: 'message'; text: string; examples?: string[] }
   | { kind: 'payment'; event: PaymentEvent; back: Screen }
 
 export const MAX_LISTEN_SEC = 8
+
+/**
+ * Tiny energy-based end-of-speech detector, so the flow is "tap, speak" (no second tap).
+ * Calibrates to the room from the quiet start, then ends after a pause once speech was heard.
+ * PCM is s16le mono 16 kHz, so 32 bytes = 1 ms.
+ */
+export class Vad {
+  private window: { rms: number; ms: number }[] = []
+  private windowMs = 0
+  private speechMs = 0
+  private silenceMs = 0
+  heardSpeech = false
+
+  constructor(private opts = { minLevel: 400, factor: 3, windowMs: 1500, minSpeechMs: 200, endSilenceMs: 900 }) {}
+
+  /**
+   * Background level: the quietest moment in the last ~1.5 s. Speech has gaps between
+   * syllables and words, so its quiet moments reveal the room; steady hum never rises
+   * above itself, so it's never mistaken for speech.
+   */
+  private floor(): number {
+    return this.window.length ? Math.min(...this.window.map(w => w.rms)) : Infinity
+  }
+
+  /** Feed one chunk; returns true when the speaker has finished. */
+  push(pcm: Uint8Array): boolean {
+    const n = pcm.byteLength >> 1
+    if (!n) return false
+    const view = new DataView(pcm.buffer, pcm.byteOffset, n * 2)
+    let sum = 0
+    for (let i = 0; i < n; i++) {
+      const v = view.getInt16(i * 2, true)
+      sum += v * v
+    }
+    const rms = Math.sqrt(sum / n)
+    const ms = n / 16
+    const threshold = Math.max(this.opts.minLevel, this.floor() * this.opts.factor)
+    this.window.push({ rms, ms })
+    this.windowMs += ms
+    while (this.window.length > 1 && this.windowMs - this.window[0].ms >= this.opts.windowMs) this.windowMs -= this.window.shift()!.ms
+
+    if (rms > threshold) {
+      this.speechMs += ms
+      this.silenceMs = 0
+      if (this.speechMs >= this.opts.minSpeechMs) this.heardSpeech = true
+    } else {
+      this.silenceMs += ms
+      if (!this.heardSpeech) this.speechMs = Math.max(0, this.speechMs - ms) // ignore clicks/blips
+    }
+    return this.heardSpeech && this.silenceMs >= this.opts.endSilenceMs
+  }
+}
 const MIN_PCM_BYTES = 16000 // 0.5 s of 16 kHz s16le mono
 const MESSAGE_MS = 2500
 const PAYMENT_MS = 4000
@@ -89,7 +141,7 @@ export class TillController {
 
   /** Text command typed on the phone (testing / noisy places): same confirm flow as voice. */
   async typed(text: string) {
-    if (this.screen.kind === 'listening') this.stopListening(false)
+    if (this.screen.kind === 'listening') await this.stopListening('cancel')
     this.go({ kind: 'thinking', transcript: text })
     await this.handleResult(() => this.api.command(text))
   }
@@ -97,13 +149,19 @@ export class TillController {
   async gesture(g: Gesture) {
     const s = this.screen
     if (g.kind === 'audio') {
-      if (s.kind === 'listening') s.chunks.push(g.pcm)
+      if (s.kind === 'listening') {
+        s.chunks.push(g.pcm)
+        if (s.vad.push(g.pcm)) void this.stopListening('auto') // speaker paused: send
+      }
       return
     }
-    if (g.kind === 'exit') return this.stopListening(false)
+    if (g.kind === 'exit') return this.stopListening('cancel')
     if (g.kind === 'foreground') {
       if (g.on) this.render()
-      else if (s.kind === 'listening') this.stopListening(false) // never leave the mic open in the background
+      else if (s.kind === 'listening') {
+        await this.stopListening('cancel') // never leave the mic open in the background
+        this.screen = { kind: 'till' }
+      }
       return
     }
 
@@ -132,9 +190,9 @@ export class TillController {
         if (g.kind === 'select') return this.orderSelect(s.order, g.index)
         return
       case 'listening':
-        if (g.kind === 'tap') return this.stopListening(true)
+        if (g.kind === 'tap') return this.stopListening('manual')
         if (g.kind === 'double') {
-          this.stopListening(false)
+          await this.stopListening('cancel')
           return this.go({ kind: 'till' })
         }
         return
@@ -159,25 +217,43 @@ export class TillController {
   // ---------- flows ----------
 
   private async startListening() {
-    const ok = await this.display.mic(true).catch(() => false)
-    if (!ok) return this.message('Mic not available', ['Type a charge on your phone'])
-    this.go({ kind: 'listening', startedAt: Date.now(), chunks: [] })
+    // Start buffering audio *before* anything else: people talk the instant they tap, and
+    // frames that arrive while we wait for audioControl() to resolve would otherwise be lost
+    // (measured in the simulator: ~0.75 s, enough to cut off "Charge").
+    // The mic-on call is also queued ahead of the screen redraw, which is slow over BLE.
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = null
+    this.screen = { kind: 'listening', startedAt: Date.now(), chunks: [], vad: new Vad() }
+    const micOn = this.display.mic(true).catch(() => false)
+    void this.render()
+    if (!(await micOn)) {
+      this.screen = { kind: 'till' }
+      return this.message('Mic not available', ['Type a charge on your phone'])
+    }
     this.ticker = setInterval(() => {
       if (this.screen.kind !== 'listening') return this.clearTicker()
       const left = MAX_LISTEN_SEC - Math.floor((Date.now() - this.screen.startedAt) / 1000)
-      if (left <= 0) void this.stopListening(true)
+      if (left <= 0) void this.stopListening('auto')
       else void this.display.text(listeningCard(left))
     }, 1000)
   }
 
-  private async stopListening(send: boolean) {
+  /**
+   * manual: the user tapped to finish, so send whatever we have.
+   * auto:   pause detected or time limit, so send only if speech was actually heard
+   *         (Whisper tends to invent text for silence).
+   * cancel: close the mic, send nothing.
+   */
+  private async stopListening(mode: 'manual' | 'auto' | 'cancel') {
     this.clearTicker()
     const s = this.screen
     if (s.kind !== 'listening') return
+    this.screen = { kind: 'thinking' } // leave 'listening' at once so late frames / a second trigger are ignored
     await this.display.mic(false).catch(() => false)
-    if (!send) return
+    if (mode === 'cancel') return
     const pcm = concat(s.chunks)
-    if (pcm.byteLength < MIN_PCM_BYTES) return this.message("Didn't hear anything", ['Tap, speak, then tap again'])
+    if (pcm.byteLength < MIN_PCM_BYTES || (mode === 'auto' && !s.vad.heardSpeech))
+      return this.message("Didn't hear anything", ['Tap, then say e.g.', '"Charge Maria twelve"'])
     this.go({ kind: 'thinking' })
     await this.handleResult(() => this.api.voice(pcm))
   }

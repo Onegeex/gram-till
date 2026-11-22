@@ -22,7 +22,7 @@ const watcher = new Watcher(store, bus, toncenterFetcher(makeClient(config.netwo
   log,
 })
 
-const app = buildApi({ store, bus, service, stt: config.stt, publicUrl: config.publicUrl, devSimulate: config.devSimulate, log })
+const app = buildApi({ store, bus, service, stt: config.stt, publicUrl: config.publicUrl, devSimulate: config.devSimulate, voiceDebugDir: config.voiceDebugDir, log })
 
 serve({ fetch: app.fetch, port: config.port }, info => {
   log(`Gram Till server on :${info.port} · network=${config.network} · public=${config.publicUrl}`)

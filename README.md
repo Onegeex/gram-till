@@ -53,7 +53,9 @@ Customer pay page (opens from the Telegram Pay button): [docs/screens/pay-page.p
 4. The server watches the seller's wallet (read-only). When a transfer arrives whose comment carries the order code and whose amount covers it, the order is **paid**. The glasses show **PAID +12 GRAM · Maria**, the customer gets a receipt, and the seller gets a Telegram DM (so nothing is missed while the glasses app is closed).
 5. Transfers without a known code show as **"MONEY IN · No order code"**, and short payments show as **"SHORT PAYMENT"**. They are never counted as paid.
 
-**Glasses controls:** tap = speak a charge · swipe = menu (repeat last, waiting orders, remind all, today's total) · double-tap = back / exit.
+**Glasses controls:** tap, then just speak: it sends when you pause (or tap again to finish) · swipe = menu (repeat last, waiting orders, remind all, today's total) · double-tap = back / exit.
+
+**Voice:** tap, speak, pause. Audio is kept from the instant of the tap (the first word isn't clipped), and the till sends automatically about 0.9 s after you stop talking. Detection adapts to background noise, so steady hum never counts as speech, and silence is never sent (Whisper invents text for silence).
 
 **Voice grammar** (deterministic, no LLM: for money, predictable beats clever):
 `charge <name | table N> <amount> [for [qty] <item>]` · `charge [qty] <item>` (price from `/menu`) · `remind <name | all>` · `cancel last` · `repeat` · `total`
@@ -71,7 +73,8 @@ Customer pay page (opens from the Telegram Pay button): [docs/screens/pay-page.p
 
 - **Any country, any time zone:** each seller sets `/timezone` in the bot (e.g. `Europe/Berlin`, `Asia/Jakarta`, `America/Sao_Paulo`), so "today" totals follow their local midnight.
 - **Any customer on Telegram:** payment requests, receipts and the pay page work wherever Telegram does. Pay with Telegram's Gram Wallet over TON Connect, any TON wallet via the `ton://` link, or by scanning the QR.
-- **Language:** the voice grammar is English for now. Whisper already transcribes many languages, so per-language grammar packs (Spanish, Portuguese, Arabic, Turkish, Indonesian…) are the next step.
+- **Speak your language:** set `/language es` (or `pt`, `fr`, `de`, `tr`, `id`, `ar`, `hi`, `ja`, `sw`… any language Whisper knows). Each command is transcribed in your language and translated to English **in parallel**. The safe English grammar parses the translation, and names and menu words are matched against what you actually said, so *"Cobra o João dois café com leite"* becomes **João · 2× café com leite**. Typed commands also understand the main verbs in Spanish, Portuguese, French, German, Italian, Turkish, Indonesian and Dutch. Non-Latin names (Олег, 健二) and accents (José = Jose) work.
+- **Amounts are GRAM.** Say "twelve", "twelve fifty" (12.50) or "12,50". If you say a fiat currency ("12 dollars", "€5", "500 naira"), the till refuses instead of silently charging 12 GRAM.
 
 ---
 
@@ -97,9 +100,11 @@ npm run dev                 # http://localhost:5173
 npm run simulate            # opens the Even Hub simulator (uses your Mac's microphone)
 ```
 
-Then in Telegram: open your bot → **/start** → shop name → paste your **testnet** wallet address → **/timezone** (your zone) → **/pair**. Enter the code in the simulator's phone panel (Server: `http://localhost:8787`).
+Then in Telegram: open your bot → **/start** → shop name → paste your **testnet** wallet address → **/timezone** (your zone) → **/language** (if not English) → **/pair**. Enter the code in the simulator's phone panel (Server: `http://localhost:8787`).
 
 **Testnet wallets and coins:** create two wallets in Tonkeeper (testnet mode) or wallet.ton.org, one for the seller and one for the customer, and get test GRAM from [@testgiver_ton_bot](https://t.me/testgiver_ton_bot). Get a Toncenter key from [@tonapibot](https://t.me/tonapibot).
+
+**Debug the mic:** set `VOICE_DEBUG_DIR=./data` to save the last voice clip as `last-voice.wav`.
 
 **No chain? UI-only mode:** set `DEV_SIMULATE=1` (testnet only). `POST /dev/pay/<order-code>` fakes a payment so you can work on the lens UI offline. Demo videos use real testnet transfers, not this.
 
@@ -110,8 +115,8 @@ Then in Telegram: open your bot → **/start** → shop name → paste your **te
 ## Tests
 
 ```bash
-cd server && npm test      # 50 tests: amounts, order matching, TON parsing, watcher paging/cursor, voice grammar, API flow, pay page
-cd app && npm test         # 14 tests: lens state machine, payment takeover rules, gestures
+cd server && npm test      # 76 tests: amounts, order matching, TON parsing, watcher, voice grammar (8 languages, fiat refusal), STT flow, API, pay page
+cd app && npm test         # 24 tests: lens state machine, payment takeover, gestures, end-of-speech detection on real speech
 ```
 
 ## Project layout

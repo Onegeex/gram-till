@@ -41,7 +41,13 @@ export interface PaymentEvent {
   comment: string | null
 }
 
-const clip = (s: string, n: number) => (s.length <= n ? s : s.slice(0, n - 1) + '.')
+/** Fit a line to n chars, cutting at a word boundary (no ellipsis glyph: it may not be in the font). */
+const clip = (s: string, n: number) => {
+  if (s.length <= n) return s
+  const cut = s.slice(0, n)
+  const sp = cut.lastIndexOf(' ')
+  return (sp > n / 2 ? cut.slice(0, sp) : cut).replace(/[\s,.;:(-]+$/, '')
+}
 const ago = (m: number) => (m < 1 ? 'now' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h`)
 
 export function tillCard(s: TillSnapshot): string {
@@ -88,7 +94,7 @@ export function confirmCard(c: Confirm): string {
 }
 
 export function listeningCard(seconds: number): string {
-  return ['LISTENING...', 'e.g. "Charge Maria twelve"', '"Charge table 4, two lattes"', '', `tap when done  |  ${seconds}s`].join('\n')
+  return ['LISTENING...', 'e.g. "Charge Maria twelve"', '"Charge table 4, two lattes"', '', `just pause when done  |  ${seconds}s`].join('\n')
 }
 
 export const thinkingCard = (transcript?: string) =>

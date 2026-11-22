@@ -24,8 +24,11 @@ export const config = {
     apiKey: env('GROQ_API_KEY') ?? env('STT_API_KEY'),
     baseUrl: env('STT_BASE_URL', 'https://api.groq.com/openai/v1') as string,
     model: env('STT_MODEL', 'whisper-large-v3-turbo') as string,
+    translateModel: env('STT_TRANSLATE_MODEL', 'whisper-large-v3') as string,
   },
   dbPath: env('DB_PATH', './data/gramtill.db') as string,
+  /** If set, the last voice clip is saved there as last-voice.wav (for checking mic audio). */
+  voiceDebugDir: env('VOICE_DEBUG_DIR'),
   /** Default for sellers who haven't set /timezone in the bot. */
   timezone: env('TILL_TIMEZONE', 'UTC') as string,
   orderTtlMinutes: Number(env('ORDER_TTL_MINUTES', '30')),
