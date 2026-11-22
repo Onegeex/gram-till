@@ -78,6 +78,11 @@ Customer pay page (opens from the Telegram Pay button): [docs/screens/pay-page.p
 
 ---
 
+## Live
+
+**https://gram-till.vercel.app** (TON testnet). Glasses app: `https://gram-till.vercel.app/glasses/`.
+Hosted on Vercel: the API runs as Vercel Functions, the wallet watcher as a Vercel Daemon, and both share a Neon Postgres database (`vercel.json`).
+
 ## Run it (Mac)
 
 **Needs:** Node.js **22.5+** (`brew install node` or nodejs.org), and for Telegram buttons an https URL (a free Cloudflare tunnel works).
