@@ -29,11 +29,17 @@ Internal target: **submit by Nov 29, 18:00 Lagos** (3-hour buffer).
 
 ## 2. The pitch
 
-**One line:** A hands-free till for people who get paid in Telegram. The payment lands and "Paid ✓" shows in your glasses. Say "charge fifteen" and the customer gets a Gram Wallet payment request.
+**One line:** A hands-free till for anyone who gets paid in Telegram, anywhere in the world. The payment lands and "PAID" shows in your glasses. Say "charge Maria twelve" and the customer gets a Gram Wallet payment request.
 
-**The everyday moment:** a food seller, barber, market trader, café worker or delivery rider takes payment in Telegram while their hands are busy. Today they stop, wipe their hands, unlock the phone and scroll to check whether money arrived, or they trust a screenshot. On G2 it takes a glance.
+**The everyday moment:** a barista steaming milk, a food-truck cook, a market trader, a barber mid-cut, a tour guide with a group, a courier at the door. Each takes payment while their hands are busy. Today they stop, unlock the phone and scroll to check whether the money arrived, or they trust a screenshot. On G2 it takes a glance.
 
-**Who it's for:** small sellers who already sell through Telegram (shop channels, groups and DMs). This is a large, real behaviour in Lagos and across emerging markets. With Gram Wallet now built into Telegram, a customer can pay without leaving the chat.
+**Who it's for:** face-to-face sellers anywhere who already sell through Telegram (shop channels, groups and DMs), from Dubai and Istanbul to Jakarta, São Paulo, Berlin and Lagos. With Gram Wallet built into Telegram for its billion-plus users, a customer can pay without leaving the chat.
+
+**Why it's global by design:**
+- **No borders:** a visitor pays a local seller in GRAM, with no card machine, local bank account or currency exchange on either side.
+- **No hardware:** no card terminal to rent. The till is the seller's glasses (or their Telegram), and the customer's phone is the payment device.
+- **Local time everywhere:** each shop sets its own time zone (`/timezone`).
+- **Languages:** Whisper transcribes many languages. The command grammar is English for the hackathon, with per-language packs as the next step.
 
 **Why now:** Telegram's native, non-custodial Gram Wallet is rolling out to its users. Telegram covers fees on 5 free transfers per day, so small payments cost the customer nothing. Sellers need a way to *receive* that payment without stopping work.
 
@@ -47,13 +53,13 @@ Internal target: **submit by Nov 29, 18:00 Lagos** (3-hour buffer).
 
 | | On the glasses | Input |
 |---|---|---|
-| **Read** | `+15 GRAM · Tunde · Order #7 ✓` takes over the lens for 4 s, then goes back to the Till card | none (it just appears while the app is open) |
+| **Read** | `PAID +12 GRAM · Maria · GT-7F3K` takes over the lens for 4 s, then goes back to the Till card | none (it just appears while the app is open) |
 | **Read** | Till card: `Today 214 GRAM · 18 paid · 2 waiting` | glance |
-| **Write** | "Charge Tunde fifteen" / "charge table four, twelve for jollof" → confirm card → tap → the bot sends the payment request | 1 tap + short phrase |
+| **Write** | "Charge Maria twelve" / "charge table four, two lattes" → confirm card → tap → the bot sends the payment request | 1 tap + short phrase |
 | **Write** | One-tap presets on the Till card: *Repeat last charge* · *Send receipt* · *Remind waiting* | 1 tap |
 | **Write** | Waiting list → tap an order → *Remind* / *Cancel* | swipe + tap |
 
-Smart defaults: last amount, recent customers and the seller's menu items ("jollof" = 12 GRAM) are configured once in Telegram (`/menu`).
+Smart defaults: last amount, recent customers and the seller's menu items ("latte" = 4 GRAM) are configured once in Telegram (`/menu`).
 
 ---
 
@@ -62,10 +68,10 @@ Smart defaults: last amount, recent customers and the seller's menu items ("joll
 - **Seller bot** (`@GramTillBot`, working name):
   - `/start` → set the receiving Gram Wallet address (paste, or connect via TON Connect)
   - `/pair` → 6-digit code for the glasses app (Google sign-in doesn't work in the WebView)
-  - `/menu jollof 12`, `/customers`, `/today` (summary), `/export` (CSV of the day)
+  - `/menu latte 4`, `/timezone Europe/Berlin`, `/customers`, `/today` (summary), `/export` (CSV of the day)
 - **Customer flow** (no app install):
   - The customer opens the shop's link or scans the counter QR (`t.me/GramTillBot?start=shop_<id>`).
-  - The bot sends **"Pay 15 GRAM — Order #7 · Mama T's Kitchen"** with a **[Pay with Gram Wallet]** button, which opens a `ton://transfer/<seller>?amount=…&text=GT-7&exp=…` link, or a TON Connect link as a fallback.
+  - The bot sends **"Pay 12 GRAM — Order GT-7F3K · Corner Coffee"** with a **[Pay with Gram Wallet]** button, which opens a `ton://transfer/<seller>?amount=…&text=GT-7&exp=…` link, or a TON Connect link as a fallback.
   - After payment, the customer automatically gets a **receipt** in the same chat.
 - **Counter QR mode:** the QR always shows the seller's *latest* waiting order, for walk-in customers with no name.
 
@@ -104,11 +110,11 @@ Smart defaults: last amount, recent customers and the seller's menu items ("joll
 
 - `@evenrealities/even_hub_sdk`, starting from the official `evenhub-templates/minimal`, with the mic pattern from `asr`.
 - Cards (one at a time, ≤ 5 short lines, 576 × 288 mono):
-  1. **Till**: `TODAY 214 GRAM` · `18 paid · 2 waiting` · `Last: Tunde +15 ✓ 2m`
-  2. **Paid! takeover** (4 s): `✓ +15 GRAM` · `Tunde · Order #7`
+  1. **Till**: `TODAY 214 GRAM` · `18 paid | 2 waiting` · `Last: Maria +12  2m`
+  2. **PAID takeover** (4 s): `PAID` · `+12 GRAM` · `Maria  GT-7F3K`
   3. **Waiting list** (list container): `#8 Table 4 · 12 · 3m`
   4. **Listening…** with a live transcript
-  5. **Confirm charge**: `CHARGE TUNDE 15 GRAM` · `"jollof"` · `tap = send · 2×tap = cancel`
+  5. **Confirm charge**: `CHARGE Maria` · `12 GRAM` · `2× latte` · `tap = SEND | 2x tap = cancel`
   6. **Sent**: `Request sent ✓ · waiting…`
 - Gestures: swipe = move between cards · tap = select/confirm · double-tap = back/cancel (double-tap on Till = exit dialog).
 - In-place updates via `textContainerUpgrade` (debounced ~150 ms). Lifecycle: pause on background, full refresh on foreground. While the glasses app is closed, Telegram notifies the seller instead (the bot DMs "Paid ✓"), so nothing is missed.
@@ -134,7 +140,7 @@ Smart defaults: last amount, recent customers and the seller's menu items ("joll
 | **Mon Nov 23** 09:00 kickoff | Scaffold + Till card on the simulator; backend skeleton; Toncenter testnet watcher | A testnet transfer to the seller address shows "+2 GRAM" on the simulator |
 | **Tue Nov 24** | Orders: create → `ton://` link with comment/exp → match → Paid takeover; SSE; lifecycle | An order paid from a second testnet wallet flips to ✓ automatically |
 | **Wed Nov 25** | Telegram bot: seller setup, /pair, customer start link, Pay button, receipts, counter QR | Customer pays from the bot message and gets a receipt; glasses show ✓ |
-| **Thu Nov 26** | Voice: mic → Whisper → grammar → confirm → send; menu + customers | "Charge Tunde fifteen" → tap → Tunde's Telegram gets the request |
+| **Thu Nov 26** | Voice: mic → Whisper → grammar → confirm → send; menu + customers | "Charge Maria twelve" → tap → Maria's Telegram gets the request |
 | **Fri Nov 27** | Waiting list, remind/cancel, presets, unmatched payments, `/today` and `/export`; **mainnet read-only mode** on the real Gram Wallet | A real Gram Wallet tip shows on the lens in read-only mode |
 | **Sat Nov 28** | UX polish on 576 × 288, error states, deploy backend, README, `evenhub pack` → `.ehpk` | Fresh clone + README gives a working setup |
 | **Sun Nov 29** | Record the ≤ 3-min video, description and feature requests. **Submit by 18:00** | Submitted on DoraHacks |
@@ -145,13 +151,13 @@ Smart defaults: last amount, recent customers and the seller's menu items ("joll
 
 ## 8. Demo video script (≤ 3 min)
 
-1. **0:00–0:20** A Lagos food seller with hands in the pot, and a customer saying "I don pay o!" On the phone today: unlock, scroll, check a screenshot.
-2. **0:20–0:55** With Gram Till: "Charge table four, twelve for jollof" → confirm card → tap. The customer's Telegram gets "Pay 12 GRAM · Order #8" → they tap Pay in their wallet.
-3. **0:55–1:25** "✓ +12 GRAM · Table 4" takes over the lens, the Till total ticks up, and a receipt appears in the customer's chat.
+1. **0:00–0:20** Quick cuts of busy hands around the world: a barista, a food truck, a market stall, a barber. Each one stops work to unlock a phone and check whether a payment arrived, or squints at a customer's screenshot.
+2. **0:20–0:55** With Gram Till: "Charge table four, two lattes" → confirm card → tap. A customer visiting from abroad gets "Pay 8 GRAM · Corner Coffee" in Telegram → taps Pay in Gram Wallet. No card, no currency exchange.
+3. **0:55–1:25** "PAID +8 GRAM · Table 4" takes over the lens, the till total ticks up, and a receipt appears in the customer's chat.
 4. **1:25–1:55** Busy moment: a waiting list with 2 orders → remind with one tap. An unmatched tip shows honestly as "Unmatched".
 5. **1:55–2:20** Real-world proof: read-only mode on a real Gram Wallet in Telegram. A 0.1 GRAM tip lands on the lens.
 6. **2:20–2:45** Safety: no keys, no custody, read-only watching, every payment approved by the customer in their own wallet, testnet by default.
-7. **2:45–3:00** Business: Telegram sellers across Africa and other emerging markets, a free tier plus a Pro tier (multi-staff, export, menus), and a path to the Even Hub catalogue.
+7. **2:45–3:00** Business: any face-to-face seller on Telegram worldwide, a free tier plus a Pro tier (multi-staff, export, menus, multi-language), and a path to the Even Hub catalogue.
 
 ---
 
@@ -164,7 +170,8 @@ Smart defaults: last amount, recent customers and the seller's menu items ("joll
 | Testnet faucet limits (2 GRAM/claim, 1 per hour) | Claim several times Mon–Thu; demo amounts of 0.1–2 GRAM |
 | Toncenter rate limits | Free API key via @tonapibot; back off and cache; a second provider as fallback |
 | STT accuracy with accents | Short fixed grammar, number normalisation, menu shortcuts, one-tap presets as backup |
-| A judge asks "who pays in GRAM?" | Answer: Telegram's built-in wallet makes it the default money in the chat; USDT on TON is the same flow (jetton transfer), a planned next step |
+| A judge asks "who pays in GRAM?" | Answer: Telegram's built-in wallet makes it the default money in the chat; stable pricing via USDT on TON is the same flow (jetton transfer), a planned next step |
+| A judge asks about non-English sellers | Whisper already transcribes many languages; the grammar is English for the hackathon, and per-language packs are the next step |
 
 ---
 
@@ -202,4 +209,4 @@ Smart defaults: last amount, recent customers and the seller's menu items ("joll
 | Read and write | 20% | Paid ✓ at a glance; "charge fifteen" + one tap; presets |
 | Technical execution | 20% | Real TON testnet payments end to end, real Gram Wallet read-only, real Telegram bot; clean README |
 | UX for display and voice | 15% | One card, ≤ 5 lines, short fixed phrases, takeover only for payments |
-| Business potential and safety | 20% | PayFi in Telegram (TVM thesis), an emerging-market seller base, no custody or keys |
+| Business potential and safety | 20% | PayFi in Telegram (TVM thesis), a worldwide seller base with no card hardware, cross-border by default, no custody or keys |

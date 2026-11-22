@@ -44,7 +44,7 @@ export function mountCompanion(h: {
       <div class="muted" id="counts"></div>
       <div id="events" class="events"></div>
       <form id="typeForm">
-        <input id="typeIn" placeholder="Type a charge: Tunde 15 for jollof" autocomplete="off">
+        <input id="typeIn" placeholder="Type a charge: Maria 12 for 2 lattes" autocomplete="off">
         <button>Send</button>
       </form>
       <p class="muted small">On the glasses: <b>tap</b> to speak a charge, <b>swipe</b> for the menu, <b>double-tap</b> to go back.</p>

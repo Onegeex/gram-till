@@ -117,7 +117,8 @@ async function main() {
   const params = new URLSearchParams(location.search)
   const urlServer = params.get('server')
   const urlCode = params.get('pair')
-  if (!backend.token && urlCode && /^\d{6}$/.test(urlCode)) {
+  // A pairing link always wins over a stored token (re-pairing a phone, or a stale token after a server reset).
+  if (urlCode && /^\d{6}$/.test(urlCode)) {
     if (urlServer) {
       backend.baseUrl = urlServer.replace(/\/$/, '')
       await save(bridge, K_SERVER, backend.baseUrl)

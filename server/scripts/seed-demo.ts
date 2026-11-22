@@ -13,8 +13,8 @@ const store = new Store(process.env.DB_PATH ?? './data/gramtill.db')
 const parsed = Address.parse(addr)
 const seller =
   store.listSellers().find(s => s.addressRaw === parsed.toRawString()) ??
-  store.createSeller("Mama T's Kitchen", parsed.toString({ testOnly: true, bounceable: false }), parsed.toRawString(), null)
-for (const [item, price] of [['jollof', '12'], ['fried rice', '12'], ['suya', '5'], ['zobo', '2']] as const) store.setMenuItem(seller.id, item, toNano(price))
-for (const name of ['Tunde', 'Bisi', 'Chidi']) store.upsertCustomer(seller.id, name, null)
+  store.createSeller('Corner Coffee', parsed.toString({ testOnly: true, bounceable: false }), parsed.toRawString(), null)
+for (const [item, price] of [['latte', '4'], ['espresso', '3'], ['croissant', '3.5'], ['flat white', '4.5']] as const) store.setMenuItem(seller.id, item, toNano(price))
+for (const name of ['Maria', 'Kenji', 'Aisha', 'Lucas']) store.upsertCustomer(seller.id, name, null)
 console.log(`Seller #${seller.id}: ${seller.name} watching ${seller.address}`)
 console.log(`Pairing code (10 min): ${store.createPairCode(seller.id)}`)

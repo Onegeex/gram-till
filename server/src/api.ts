@@ -162,7 +162,7 @@ export function buildApi(d: ApiDeps) {
     try {
       const seller = c.get('seller')
       const vocab = [...d.store.listCustomers(seller.id).map(x => x.name), ...d.store.listMenu(seller.id).map(m => m.item)].slice(0, 40)
-      const transcript = await transcribe(pcm, { ...d.stt, prompt: `Charge Tunde fifteen. Charge table four, twelve for jollof. ${vocab.join(', ')}` })
+      const transcript = await transcribe(pcm, { ...d.stt, prompt: `Charge Maria twelve. Charge table four, two lattes. ${vocab.join(', ')}` })
       if (!transcript) return c.json({ transcript: '', action: 'error', message: "Didn't hear anything", examples: EXAMPLES })
       return interpret(c, transcript)
     } catch (err) {

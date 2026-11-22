@@ -47,6 +47,12 @@ describe('parseCommand: charge', () => {
   it('name + menu item + explicit price', () => {
     expect(p('charge Tunde jollof 15')).toEqual({ kind: 'charge', label: 'Tunde', amount: 15, item: 'jollof', qty: 1 })
   })
+  it('plural menu items ("two lattes")', () => {
+    const intl = { menu: ['latte', 'espresso', 'flat white'], customers: ['Maria', 'Kenji', 'Aisha'] }
+    expect(parseCommand('charge table four, two lattes', intl)).toEqual({ kind: 'charge', label: 'Table 4', amount: null, item: 'latte', qty: 2 })
+    expect(parseCommand('charge Kenji three espressos', intl)).toEqual({ kind: 'charge', label: 'Kenji', amount: null, item: 'espresso', qty: 3 })
+    expect(parseCommand('charge Aisha two flat whites', intl)).toEqual({ kind: 'charge', label: 'Aisha', amount: null, item: 'flat white', qty: 2 })
+  })
   it('two-word menu item', () => {
     expect(p('charge Chidi two fried rice')).toEqual({ kind: 'charge', label: 'Chidi', amount: null, item: 'fried rice', qty: 2 })
   })

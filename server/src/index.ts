@@ -34,7 +34,7 @@ serve({ fetch: app.fetch, port: config.port }, info => {
 watcher.start()
 
 if (config.telegramBotToken) {
-  startBot({ token: config.telegramBotToken, store, bus, service, network: config.network, publicUrl: config.publicUrl, log })
+  startBot({ token: config.telegramBotToken, store, bus, service, network: config.network, publicUrl: config.publicUrl, defaultTimezone: config.timezone, log })
     .then(notifier => {
       service.notifier = notifier
     })

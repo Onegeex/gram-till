@@ -26,7 +26,8 @@ export const config = {
     model: env('STT_MODEL', 'whisper-large-v3-turbo') as string,
   },
   dbPath: env('DB_PATH', './data/gramtill.db') as string,
-  timezone: env('TILL_TIMEZONE', 'Africa/Lagos') as string,
+  /** Default for sellers who haven't set /timezone in the bot. */
+  timezone: env('TILL_TIMEZONE', 'UTC') as string,
   orderTtlMinutes: Number(env('ORDER_TTL_MINUTES', '30')),
   /** Largest single charge allowed from voice/glasses, in GRAM. Guards against misheard amounts. */
   maxChargeGram: Number(env('MAX_CHARGE_GRAM', '500')),

@@ -24,6 +24,15 @@ export interface ChargePreview {
 
 export type ServiceError = { error: string }
 
+export function isValidTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz })
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function tzOffsetSeconds(timeZone: string, at = new Date()): number {
   const part = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' })
     .formatToParts(at)
@@ -51,7 +60,7 @@ export class TillService {
 
   snapshot(seller: Seller) {
     const now = Math.floor(Date.now() / 1000)
-    const totals = this.store.todayTotals(seller.id, startOfLocalDay(this.cfg.timezone, now))
+    const totals = this.store.todayTotals(seller.id, startOfLocalDay(seller.timezone ?? this.cfg.timezone, now))
     const labelFor = (orderId: number | null) => (orderId ? this.store.getOrder(orderId)?.label ?? null : null)
     return {
       seller: { name: seller.name, address: seller.address, network: this.cfg.network },

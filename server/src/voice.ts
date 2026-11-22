@@ -257,4 +257,4 @@ function resolveLabel(words: string[], ctx: VoiceContext): string {
 }
 
 /** Example phrases shown on the lens when a command isn't understood. */
-export const EXAMPLES = ['"Charge Tunde fifteen"', '"Charge table four, twelve for jollof"', '"Remind all"']
+export const EXAMPLES = ['"Charge Maria twelve"', '"Charge table four, two lattes"', '"Remind all"']

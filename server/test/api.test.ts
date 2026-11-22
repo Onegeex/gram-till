@@ -4,7 +4,7 @@ import { buildApi } from '../src/api.js'
 import { Store } from '../src/db.js'
 import { toNano } from '../src/money.js'
 import { TillBus, processIncoming } from '../src/processor.js'
-import { TillService, startOfLocalDay, tzOffsetSeconds, type Notifier } from '../src/service.js'
+import { TillService, isValidTimezone, startOfLocalDay, tzOffsetSeconds, type Notifier } from '../src/service.js'
 import { pcmToWav } from '../src/stt.js'
 
 const ADDR = 'EQD2NmD_lH5f5u1Kj3KfGyTvhZSX0Eg6qp2a5IQUKXxOG21n'
@@ -110,6 +110,15 @@ describe('API', () => {
     expect(s.store.waitingOrders(s.seller.id)).toHaveLength(0)
   })
 
+  it("uses each seller's own time zone for today's totals", async () => {
+    const s = setup()
+    const api = await pair(s)
+    s.store.updateSellerTimezone(s.seller.id, 'Pacific/Kiritimati') // UTC+14, the earliest "today" on Earth
+    s.store.recordPayment({ txHash: 'y', sellerId: s.seller.id, amountNano: toNano('3'), comment: null, from: null, utime: Math.floor(Date.now() / 1000) - 60, result: 'unmatched', orderId: null })
+    const till = (await (await api('/api/till')).json()) as any
+    expect(till.today.total).toBe('3')
+  })
+
   it('serves the pay page and status', async () => {
     const s = setup()
     const order = s.store.createOrder({ sellerId: s.seller.id, label: 'Tunde', amountNano: toNano('15'), item: 'jollof' })
@@ -127,6 +136,18 @@ describe('API', () => {
 })
 
 describe('helpers', () => {
+  it('starts "today" at local midnight in any time zone', () => {
+    const t = Date.UTC(2026, 10, 22, 12, 0) / 1000 // noon UTC
+    expect(startOfLocalDay('UTC', t)).toBe(Date.UTC(2026, 10, 22, 0, 0) / 1000)
+    expect(startOfLocalDay('Asia/Tokyo', t)).toBe(Date.UTC(2026, 10, 21, 15, 0) / 1000) // UTC+9
+    expect(startOfLocalDay('America/New_York', t)).toBe(Date.UTC(2026, 10, 22, 5, 0) / 1000) // UTC-5 (standard time)
+    expect(startOfLocalDay('Asia/Kolkata', t)).toBe(Date.UTC(2026, 10, 21, 18, 30) / 1000) // UTC+5:30
+    expect(startOfLocalDay('Europe/Berlin', t)).toBe(Date.UTC(2026, 10, 21, 23, 0) / 1000) // UTC+1
+  })
+  it('validates IANA time zones', () => {
+    expect(isValidTimezone('America/Sao_Paulo')).toBe(true)
+    expect(isValidTimezone('Mars/Olympus')).toBe(false)
+  })
   it('computes Lagos day start', () => {
     expect(tzOffsetSeconds('Africa/Lagos')).toBe(3600)
     // 2026-11-22 00:30 Lagos = 2026-11-21 23:30 UTC -> day starts 2026-11-21 23:00 UTC

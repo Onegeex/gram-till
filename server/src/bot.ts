@@ -3,7 +3,7 @@ import QRCode from 'qrcode'
 import type { Customer, Order, Seller, Store } from './db.js'
 import { fromNano, toNano } from './money.js'
 import type { TillBus } from './processor.js'
-import { isError, type Notifier, type TillService } from './service.js'
+import { isError, isValidTimezone, type Notifier, type TillService } from './service.js'
 import { friendlyAddress, isValidAddress, rawAddress, type Network } from './ton.js'
 import { parseCommand } from './voice.js'
 
@@ -14,6 +14,7 @@ interface BotDeps {
   service: TillService
   network: Network
   publicUrl: string
+  defaultTimezone: string
   log: (...a: unknown[]) => void
 }
 
@@ -24,12 +25,13 @@ const HELP = `*Gram Till*: a hands-free till for your Telegram shop, on Even G2 
 *Set up*
 /wallet <address>: change the wallet you get paid into
 /name <shop name>: rename your shop
-/menu jollof 12: set a menu price (/menu to list, /menu remove jollof)
+/menu latte 4: set a menu price (/menu to list, /menu remove latte)
+/timezone Europe/Berlin: your local time zone (for "today" totals)
 /link: your shop link and counter QR for customers
 
 *Use*
 /pair: 6-digit code to connect your glasses
-/charge Tunde 15 for jollof: charge from Telegram
+/charge Maria 12 for 2 lattes: charge from Telegram
 /waiting · /today · /customers
 
 Gram Till never holds money or keys. It only watches your wallet and sends payment links.`
@@ -93,9 +95,19 @@ export async function startBot(d: BotDeps): Promise<Notifier> {
     const seller = sellerOf(ctx)
     if (!seller) return ctx.reply('Send /start to set up your shop first.')
     const name = ctx.match?.trim()
-    if (!name) return ctx.reply('Usage: /name Mama T’s Kitchen')
+    if (!name) return ctx.reply('Usage: /name Corner Coffee')
     d.store.updateSellerName(seller.id, name.slice(0, 40))
     return ctx.reply(`✅ Shop name: ${name.slice(0, 40)}`)
+  })
+
+  bot.command('timezone', async ctx => {
+    const seller = sellerOf(ctx)
+    if (!seller) return ctx.reply('Send /start to set up your shop first.')
+    const tz = ctx.match?.trim() ?? ''
+    if (!tz) return ctx.reply(`Your till's day runs on ${seller.timezone ?? d.defaultTimezone}.\nChange it: /timezone Europe/Berlin (any IANA zone, e.g. America/New_York, Asia/Dubai, Asia/Jakarta)`)
+    if (!isValidTimezone(tz)) return ctx.reply('Unknown time zone. Examples: Europe/London, America/Sao_Paulo, Asia/Dubai, Asia/Tokyo')
+    d.store.updateSellerTimezone(seller.id, tz)
+    return ctx.reply(`✅ "Today" now follows ${tz}`)
   })
 
   bot.command('pair', async ctx => {
@@ -112,7 +124,7 @@ export async function startBot(d: BotDeps): Promise<Notifier> {
     if (!args) {
       const menu = d.store.listMenu(seller.id)
       return ctx.reply(
-        menu.length ? '📋 Menu\n' + menu.map(m => `• ${m.item}: ${fromNano(m.amountNano)} GRAM`).join('\n') + '\n\nSay "charge two jollof" on the glasses.' : 'No menu yet. Add one: /menu jollof 12',
+        menu.length ? '📋 Menu\n' + menu.map(m => `• ${m.item}: ${fromNano(m.amountNano)} GRAM`).join('\n') + '\n\nSay "charge two lattes" on the glasses.' : 'No menu yet. Add one: /menu latte 4',
       )
     }
     const rm = args.match(/^remove\s+(.+)$/i)
@@ -121,7 +133,7 @@ export async function startBot(d: BotDeps): Promise<Notifier> {
       return ctx.reply(`Removed ${rm[1]}`)
     }
     const m = args.match(/^(.+?)\s+(\d+(?:\.\d{1,9})?)$/)
-    if (!m) return ctx.reply('Usage: /menu jollof 12')
+    if (!m) return ctx.reply('Usage: /menu latte 4')
     d.store.setMenuItem(seller.id, m[1], toNano(m[2]))
     return ctx.reply(`✅ ${m[1].toLowerCase()}: ${m[2]} GRAM`)
   })
@@ -168,7 +180,7 @@ export async function startBot(d: BotDeps): Promise<Notifier> {
     if (!seller) return ctx.reply('Send /start to set up your shop first.')
     const ctxV = { menu: d.store.listMenu(seller.id).map(m => m.item), customers: d.store.listCustomers(seller.id).map(c => c.name) }
     const cmd = parseCommand(`charge ${ctx.match ?? ''}`, ctxV)
-    if (cmd.kind !== 'charge') return ctx.reply('Usage: /charge Tunde 15 for jollof')
+    if (cmd.kind !== 'charge') return ctx.reply('Usage: /charge Maria 12 for 2 lattes')
     const p = d.service.previewCharge(seller, cmd)
     if (isError(p)) return ctx.reply(p.error)
     const r = await d.service.charge(seller, p)
@@ -206,7 +218,7 @@ export async function startBot(d: BotDeps): Promise<Notifier> {
     if (!isValidAddress(text)) return ctx.reply("That doesn't look like a TON address. Try again.")
     steps.delete(ctx.chat.id)
     const seller = d.store.createSeller(st.name, friendlyAddress(text, d.network), rawAddress(text), ctx.chat.id)
-    await ctx.reply(`✅ ${seller.name} is ready. Watching \`${seller.address}\`${net}.\n\nNext: /link for your counter QR, /menu to add prices, /pair to connect your glasses.`, {
+    await ctx.reply(`✅ ${seller.name} is ready. Watching \`${seller.address}\`${net}.\n\nNext: /timezone for your local day, /link for your counter QR, /menu to add prices, /pair to connect your glasses.`, {
       parse_mode: 'Markdown',
     })
   })
@@ -217,7 +229,7 @@ export async function startBot(d: BotDeps): Promise<Notifier> {
     if (!seller || !ctx.chat || !ctx.from) return ctx.reply('Shop not found.')
     if (seller.tgChatId === ctx.chat.id) return ctx.reply("That's your own shop link. Share it with customers 🙂")
     const first = (ctx.from.first_name || 'Customer').trim()
-    // Keep names unique per shop so "charge Tunde" is never ambiguous.
+    // Keep names unique per shop so "charge Maria" is never ambiguous.
     let name = first
     const clash = d.store.findCustomer(seller.id, name)
     if (clash && clash.tgChatId !== ctx.chat.id) name = `${first} ${(ctx.from.last_name ?? ctx.from.username ?? String(ctx.from.id)).slice(0, 1).toUpperCase()}.`
@@ -276,6 +288,7 @@ export async function startBot(d: BotDeps): Promise<Notifier> {
     { command: 'waiting', description: 'Waiting orders' },
     { command: 'today', description: "Today's total" },
     { command: 'wallet', description: 'Wallet you get paid into' },
+    { command: 'timezone', description: 'Your local time zone' },
     { command: 'help', description: 'Help' },
   ])
   bot.catch(err => d.log('[bot] error:', err.message))

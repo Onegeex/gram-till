@@ -2,7 +2,9 @@
 
 **A hands-free till for people who get paid in Telegram, on Even Realities G2 glasses.**
 
-A payment lands in your Gram Wallet and **PAID +15 GRAM · Tunde** appears in your glasses. Say *"charge table four, twelve for jollof"*, tap once, and the customer gets a payment request in Telegram. No unlocking your phone with greasy hands, and no trusting payment screenshots.
+A payment lands in your Gram Wallet and **PAID +12 GRAM · Maria** appears in your glasses. Say *"charge table four, two lattes"*, tap once, and the customer gets a payment request in Telegram. No unlocking your phone mid-task, no card terminal, and no trusting payment screenshots.
+
+**Who it's for:** anyone, anywhere, who sells face to face and gets paid in Telegram, often with their hands full: coffee carts, food trucks, market stalls, barbers, tour guides, couriers, event and merch tables. Telegram's built-in Gram Wallet works across borders, so a seller can take payment from a local regular or a visitor from another country without a card machine, a local bank account or a currency exchange.
 
 Built for **Heads Up: Even Realities Hackathon** (DoraHacks) · Tracks: **02 Crypto & DeFi** (Gram Wallet) + **01 Messaging & News** (Telegram) · Special: Best Telegram integration.
 
@@ -46,9 +48,9 @@ Customer pay page (opens from the Telegram Pay button): [docs/screens/pay-page.p
 ```
 
 1. The seller sets up a shop in the Telegram bot and gives the wallet address they get paid into (their Gram Wallet).
-2. On the glasses: **tap → speak → tap**, e.g. *"charge Tunde fifteen"*. The server turns speech into a **confirm card**. **Tap = send**, double-tap = cancel. Nothing is sent without that tap.
+2. On the glasses: **tap → speak → tap**, e.g. *"charge Maria twelve"*. The server turns speech into a **confirm card**. **Tap = send**, double-tap = cancel. Nothing is sent without that tap.
 3. The customer gets **"Pay 15 GRAM · Order GT-7F3K"** in Telegram, with a Pay button. It opens the pay page, which offers TON Connect (Gram Wallet, Tonkeeper…), a `ton://` link and a QR. The order code goes into the transfer comment automatically.
-4. The server watches the seller's wallet (read-only). When a transfer arrives whose comment carries the order code and whose amount covers it, the order is **paid**. The glasses show **PAID +15 GRAM · Tunde**, the customer gets a receipt, and the seller gets a Telegram DM (so nothing is missed while the glasses app is closed).
+4. The server watches the seller's wallet (read-only). When a transfer arrives whose comment carries the order code and whose amount covers it, the order is **paid**. The glasses show **PAID +12 GRAM · Maria**, the customer gets a receipt, and the seller gets a Telegram DM (so nothing is missed while the glasses app is closed).
 5. Transfers without a known code show as **"MONEY IN · No order code"**, and short payments show as **"SHORT PAYMENT"**. They are never counted as paid.
 
 **Glasses controls:** tap = speak a charge · swipe = menu (repeat last, waiting orders, remind all, today's total) · double-tap = back / exit.
@@ -64,6 +66,12 @@ Customer pay page (opens from the Telegram Pay button): [docs/screens/pay-page.p
 - **Pairing codes** (6 digits, 10 minutes, single use) instead of passwords. Google sign-in doesn't work in the Even WebView.
 - **Secrets stay on the server** (`.env`, never committed). The glasses app only talks to your server.
 - The lens shows first names and order codes only.
+
+## Works anywhere
+
+- **Any country, any time zone:** each seller sets `/timezone` in the bot (e.g. `Europe/Berlin`, `Asia/Jakarta`, `America/Sao_Paulo`), so "today" totals follow their local midnight.
+- **Any customer on Telegram:** payment requests, receipts and the pay page work wherever Telegram does. Pay with Telegram's Gram Wallet over TON Connect, any TON wallet via the `ton://` link, or by scanning the QR.
+- **Language:** the voice grammar is English for now. Whisper already transcribes many languages, so per-language grammar packs (Spanish, Portuguese, Arabic, Turkish, Indonesian…) are the next step.
 
 ---
 
@@ -89,7 +97,7 @@ npm run dev                 # http://localhost:5173
 npm run simulate            # opens the Even Hub simulator (uses your Mac's microphone)
 ```
 
-Then in Telegram: open your bot → **/start** → shop name → paste your **testnet** wallet address → **/pair**. Enter the code in the simulator's phone panel (Server: `http://localhost:8787`).
+Then in Telegram: open your bot → **/start** → shop name → paste your **testnet** wallet address → **/timezone** (your zone) → **/pair**. Enter the code in the simulator's phone panel (Server: `http://localhost:8787`).
 
 **Testnet wallets and coins:** create two wallets in Tonkeeper (testnet mode) or wallet.ton.org, one for the seller and one for the customer, and get test GRAM from [@testgiver_ton_bot](https://t.me/testgiver_ton_bot). Get a Toncenter key from [@tonapibot](https://t.me/tonapibot).
 
@@ -114,7 +122,7 @@ server/src/
   watcher.ts     polls each seller's wallet; cursor-based, never replays history
   matcher.ts     payment → order decision (paid / underpaid / unmatched / duplicate…)
   processor.ts   applies a payment once (idempotent by tx hash) and publishes events
-  voice.ts       deterministic voice grammar ("charge table four, twelve for jollof")
+  voice.ts       deterministic voice grammar ("charge table four, two lattes")
   stt.ts         mic PCM → WAV → Whisper
   service.ts     till operations shared by the glasses API and the bot
   api.ts         REST + SSE + pay page + one-shot confirmations

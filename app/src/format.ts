@@ -88,7 +88,7 @@ export function confirmCard(c: Confirm): string {
 }
 
 export function listeningCard(seconds: number): string {
-  return ['LISTENING...', 'e.g. "Charge Tunde fifteen"', '"Charge table 4 for two jollof"', '', `tap when done  |  ${seconds}s`].join('\n')
+  return ['LISTENING...', 'e.g. "Charge Maria twelve"', '"Charge table 4, two lattes"', '', `tap when done  |  ${seconds}s`].join('\n')
 }
 
 export const thinkingCard = (transcript?: string) =>
