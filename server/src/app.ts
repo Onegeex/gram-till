@@ -27,7 +27,7 @@ async function init() {
     log: console.log,
     bot,
     telegramWebhookSecret: config.telegramWebhookSecret,
-    sse: { maxSec: config.sseMaxSec },
+    sse: { maxSec: config.sseMaxSec, pollMs: 1500 },
   })
 }
 

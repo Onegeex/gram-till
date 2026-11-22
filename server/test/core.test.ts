@@ -148,3 +148,24 @@ describe('Watcher', () => {
     await store.close()
   })
 })
+
+describe('Watcher database usage', () => {
+  it('idle polling does not hit the database every tick', async () => {
+    const { store, seller } = await setup()
+    const counts = { listSellers: 0, getCursor: 0 }
+    const wrapped = new Proxy(store, {
+      get(t: any, k: string) {
+        if (k in counts) return (...a: any[]) => ((counts as any)[k]++, t[k](...a))
+        const v = t[k]
+        return typeof v === 'function' ? v.bind(t) : v
+      },
+    })
+    const chain: TxLike[] = [fakeTx({ amount: toNano('1'), comment: 'x' })]
+    const w = new Watcher(wrapped, async () => chain.slice(0, 1), 'testnet', { sellerRefreshMs: 60_000 })
+    for (let i = 0; i < 10; i++) await w.tick()
+    expect(counts.listSellers).toBe(1)
+    expect(counts.getCursor).toBe(1)
+    expect(seller.id).toBeGreaterThan(0)
+    await store.close()
+  })
+})

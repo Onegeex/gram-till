@@ -21,12 +21,24 @@ export class Watcher {
   private timer: NodeJS.Timeout | null = null
   private busy = false
   private failures = 0
+  // Keep database traffic low while idle (free-tier databases bill per request / awake hour):
+  // the seller list is refreshed once a minute and cursors live in memory after the first read.
+  private sellers: { id: number; address: string }[] = []
+  private sellersAt = 0
+  private cursors = new Map<string, { lt: string; hash: string } | null>()
 
   constructor(
     private store: TillStore,
     private fetchTxs: FetchTxs,
     private network: Network,
-    private opts: { intervalMs?: number; pageSize?: number; log?: (...a: unknown[]) => void; onPayment?: PaymentListener; onTick?: () => void } = {},
+    private opts: {
+      intervalMs?: number
+      pageSize?: number
+      sellerRefreshMs?: number
+      log?: (...a: unknown[]) => void
+      onPayment?: PaymentListener
+      onTick?: () => void
+    } = {},
   ) {}
 
   start() {
@@ -50,7 +62,11 @@ export class Watcher {
     if (this.busy) return
     this.busy = true
     try {
-      for (const seller of await this.store.listSellers()) {
+      if (Date.now() - this.sellersAt >= (this.opts.sellerRefreshMs ?? 60_000)) {
+        this.sellers = (await this.store.listSellers()).map(s => ({ id: s.id, address: s.address }))
+        this.sellersAt = Date.now()
+      }
+      for (const seller of this.sellers) {
         if (!seller.address) continue
         await this.pollSeller(seller.id, seller.address)
       }
@@ -66,15 +82,22 @@ export class Watcher {
 
   async pollSeller(sellerId: number, address: string) {
     const limit = this.opts.pageSize ?? 20
-    const cursor = await this.store.getCursor(sellerId)
+    // Cursor cache is keyed by seller+address: changing the wallet (/wallet) starts fresh.
+    const key = `${sellerId}|${address}`
+    if (!this.cursors.has(key)) this.cursors.set(key, await this.store.getCursor(sellerId))
+    const cursor = this.cursors.get(key) ?? null
+    const save = async (lt: string, hash: string) => {
+      this.cursors.set(key, { lt, hash })
+      await this.store.setCursor(sellerId, lt, hash)
+    }
 
     if (!cursor) {
       const latest = await this.fetchTxs(address, { limit: 1 })
       if (latest[0]) {
         const id = txId(latest[0])
-        await this.store.setCursor(sellerId, id.lt, id.hash)
+        await save(id.lt, id.hash)
       } else {
-        await this.store.setCursor(sellerId, '0', '') // empty wallet: everything from now on is new
+        await save('0', '') // empty wallet: everything from now on is new
       }
       return
     }
@@ -102,7 +125,7 @@ export class Watcher {
         if (done) await Promise.resolve(this.opts.onPayment?.(sellerId, done)).catch(err => this.opts.log?.('[watcher] notify failed:', (err as Error).message))
       }
       const id = txId(tx)
-      await this.store.setCursor(sellerId, id.lt, id.hash)
+      await save(id.lt, id.hash)
     }
   }
 }
