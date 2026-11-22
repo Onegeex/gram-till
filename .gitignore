@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.ehpk
+.env
+.env.local
+data/
+*.db
+*.db-wal
+*.db-shm
+Gram-Till-Build-Plan.pdf
