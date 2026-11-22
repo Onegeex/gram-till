@@ -214,6 +214,24 @@ export function parseCommand(text: string, ctx: VoiceContext): Command {
     nameWords = words.slice(0, idx).concat(words.slice(idx + 1)).filter(t => !isNum(t))
   }
 
+  if (!item && nameWords.length > 1) {
+    // "charge Bisi two zobo": a menu item at the end of the phrase, with the number just before it as quantity.
+    for (let k = nameWords.length - 1; k >= 1; k--) {
+      const suffix = nameWords.slice(-k).join(' ')
+      const asItem = ctx.menu.find(m => m === suffix) ?? fuzzyPick(suffix, ctx.menu)
+      if (!asItem) continue
+      const itemStart = words.indexOf(nameWords[nameWords.length - k])
+      const numIdx = lastNum !== undefined ? words.lastIndexOf(lastNum) : -1
+      if (numIdx === itemStart - 1 && amount !== null && Number.isInteger(amount) && amount <= 20) {
+        qty = amount
+        amount = null
+      }
+      item = asItem
+      nameWords = nameWords.slice(0, -k)
+      break
+    }
+  }
+
   if (!item && nameWords.length) {
     // "charge jollof" / "charge two jollof": the "name" is really a menu item.
     const asItem = fuzzyPick(nameWords.join(' '), ctx.menu)

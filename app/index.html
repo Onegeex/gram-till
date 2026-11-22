@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+    <title>Gram Till</title>
+    <style>
+      html, body { margin: 0; min-height: 100%; background: #232323; color: #E5E5E5;
+        font: 15px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        touch-action: manipulation; -webkit-text-size-adjust: 100%; overscroll-behavior: none; }
+      #app { padding: 16px; max-width: 480px; margin: 0 auto; }
+      header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 18px; }
+      .chip { font-size: 12px; padding: 3px 10px; border-radius: 99px; background: #3a3a3a; }
+      .chip.on { background: #1f5131; color: #b9f5cd; } .chip.warn { background: #5a4a16; } .chip.off { background: #4a2626; }
+      .card { background: #2d2d2d; border-radius: 14px; padding: 16px; }
+      .hidden { display: none; }
+      h2 { margin: 0 0 6px; font-size: 17px; }
+      .muted { color: #a3a3a3; } .small { font-size: 13px; }
+      .big { font-size: 30px; font-weight: 700; margin: 2px 0; }
+      label { display: block; margin: 10px 0; font-size: 13px; color: #bdbdbd; }
+      input { width: 100%; box-sizing: border-box; margin-top: 4px; padding: 11px; border-radius: 10px; border: 1px solid #444; background: #1c1c1c; color: #eee; font-size: 16px; }
+      button { padding: 11px 16px; border-radius: 10px; border: 0; background: #3ddc84; color: #06210f; font-weight: 600; font-size: 15px; }
+      button.link { background: none; color: #8a8a8a; padding: 8px 0; font-weight: 400; }
+      #typeForm { display: flex; gap: 8px; margin-top: 14px; } #typeForm input { margin: 0; }
+      .events { margin-top: 12px; font-size: 14px; } .events div { padding: 6px 0; border-top: 1px solid #3a3a3a; }
+      .err { color: #ff8a80; font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <div id="app">Starting Gram Till…</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

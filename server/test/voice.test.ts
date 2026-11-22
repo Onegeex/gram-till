@@ -40,6 +40,16 @@ describe('parseCommand: charge', () => {
   it('name + "for two suya"', () => {
     expect(p('charge Chidi for two suya')).toEqual({ kind: 'charge', label: 'Chidi', amount: null, item: 'suya', qty: 2 })
   })
+  it('name + quantity + menu item', () => {
+    expect(p('charge Bisi two zobo')).toEqual({ kind: 'charge', label: 'Bisi Adeyemi', amount: null, item: 'zobo', qty: 2 })
+    expect(p('charge Tunde 3 suya')).toEqual({ kind: 'charge', label: 'Tunde', amount: null, item: 'suya', qty: 3 })
+  })
+  it('name + menu item + explicit price', () => {
+    expect(p('charge Tunde jollof 15')).toEqual({ kind: 'charge', label: 'Tunde', amount: 15, item: 'jollof', qty: 1 })
+  })
+  it('two-word menu item', () => {
+    expect(p('charge Chidi two fried rice')).toEqual({ kind: 'charge', label: 'Chidi', amount: null, item: 'fried rice', qty: 2 })
+  })
   it('fuzzy customer name from STT misspelling', () => {
     expect(p('charge Bisi Adeyem 20 grams')).toMatchObject({ label: 'Bisi Adeyemi', amount: 20 })
   })
