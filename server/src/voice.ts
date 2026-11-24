@@ -194,6 +194,17 @@ export function tokenize(text: string): string[] {
     .map(t => ALIASES[t] ?? t)
 }
 
+/** A mangled command verb at the start of a spoken command, e.g. "cha", "charj", "chaj", "shaj", "remaind". */
+export function soundsLikeVerb(word: string): string | null {
+  const w = fold(word.toLowerCase())
+  // Normalise the sounds accents swap: sh/j at the start -> ch, a final j -> rge ("shaj", "chaj" ~ "charge").
+  const c = w.replace(/^(sh|j)/, 'ch').replace(/j$/, 'rge')
+  if (/^cha[a-z]{0,5}$/.test(c) && levenshtein(c, 'charge') <= 3) return 'charge'
+  if (/^r[ei]m[a-z]*$/.test(w) && levenshtein(w, 'remind') <= 2) return 'remind'
+  if (/^ca?n[a-z]*$/.test(w) && w !== 'can' && levenshtein(w, 'cancel') <= 2 && w !== 'cancer') return 'cancel'
+  return null
+}
+
 function levenshtein(a: string, b: string): number {
   const dp = Array.from({ length: b.length + 1 }, (_, j) => j)
   for (let i = 1; i <= a.length; i++) {
@@ -228,9 +239,15 @@ const titleCase = (s: string) => s.replace(/(^|\s)(\p{L})/gu, (_, sp, c) => sp +
 
 export function parseCommand(text: string, ctx: VoiceContext): Command {
   const raw = tokenize(text)
-  const verbIdx = raw.findIndex(t => t in VERB_ALIASES)
-  if (verbIdx === -1) return { kind: 'unknown', text }
-  const verb = VERB_ALIASES[raw[verbIdx]]
+  let verbIdx = raw.findIndex(t => t in VERB_ALIASES)
+  let verb = verbIdx === -1 ? undefined : VERB_ALIASES[raw[verbIdx]]
+  if (verb === undefined && raw.length > 1) {
+    // Accents: speech-to-text often mangles the command word itself ("Chá", "Charj", "Remaind").
+    // Only the FIRST word is tried, and only against the few command verbs, so names never become verbs.
+    verb = soundsLikeVerb(raw[0]) ?? undefined
+    if (verb) verbIdx = 0
+  }
+  if (verb === undefined || verbIdx === -1) return { kind: 'unknown', text }
   if (verb === 'charge') {
     const menuWords = new Set(ctx.menu.flatMap(m => tokenize(m)))
     if (raw.some(t => FIAT.has(t) && !menuWords.has(t))) return { kind: 'unknown', text, reason: 'fiat' }

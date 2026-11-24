@@ -33,7 +33,8 @@ export const config = {
   stt: {
     apiKey: env('GROQ_API_KEY') ?? env('STT_API_KEY'),
     baseUrl: env('STT_BASE_URL', 'https://api.groq.com/openai/v1') as string,
-    model: env('STT_MODEL', 'whisper-large-v3-turbo') as string,
+    // Full large-v3 (not turbo): noticeably better on accented English; Groq keeps it ~1 s.
+    model: env('STT_MODEL', 'whisper-large-v3') as string,
     translateModel: env('STT_TRANSLATE_MODEL', 'whisper-large-v3') as string,
   },
   dbPath: env('DB_PATH', './data/gramtill.db') as string,

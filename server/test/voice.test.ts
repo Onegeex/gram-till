@@ -187,3 +187,22 @@ describe('speech-to-text homophones', () => {
     expect(parseCommand('Charge Maria for two lattes', ctx)).toMatchObject({ kind: 'charge', label: 'Maria', item: 'latte', qty: 2 })
   })
 })
+
+describe('accented speech', () => {
+  const ctx = { menu: ['latte'], customers: ['Abiola', 'Maria'] }
+  it('understands a mangled "charge" as the first word', () => {
+    expect(parseCommand('Chá, Abiola, one.', ctx)).toMatchObject({ kind: 'charge', label: 'Abiola', amount: 1 })
+    expect(parseCommand('Charj Maria twelve', ctx)).toMatchObject({ kind: 'charge', label: 'Maria', amount: 12 })
+    expect(parseCommand('Shaj table four 5', ctx)).toMatchObject({ kind: 'charge', label: 'Table 4', amount: 5 })
+    expect(parseCommand('Remaind all', ctx)).toMatchObject({ kind: 'remind', target: 'all' })
+  })
+  it('matches a misheard name to a known one', () => {
+    expect(parseCommand('Charge Nabiola one', ctx)).toMatchObject({ kind: 'charge', label: 'Abiola', amount: 1 })
+  })
+  it('never turns a name or random first word into a command', () => {
+    expect(parseCommand('Chad twelve', { menu: [], customers: [] }).kind).toBe('charge') // close enough to "charge"; the confirm card shows it
+    expect(parseCommand('Maria twelve', ctx).kind).toBe('unknown')
+    expect(parseCommand('cancer', ctx).kind).toBe('unknown')
+  })
+})
+

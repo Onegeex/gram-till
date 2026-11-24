@@ -1,6 +1,6 @@
 // Speech-to-text. The Even Hub SDK gives raw mic audio (PCM s16le, 16 kHz, mono);
 // we wrap it as WAV and send it to an OpenAI-compatible transcription endpoint
-// (default: Groq whisper-large-v3-turbo). Keys stay on this server.
+// (default: Groq whisper-large-v3). Keys stay on this server.
 
 export function pcmToWav(pcm: Uint8Array, sampleRate = 16000, channels = 1, bitsPerSample = 16): Uint8Array<ArrayBuffer> {
   const header = new ArrayBuffer(44)

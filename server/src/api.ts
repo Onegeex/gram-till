@@ -154,9 +154,12 @@ export function buildApi(d: ApiDeps) {
    */
   async function interpret(c: Context<Env>, transcript: string, original?: string) {
     const seller = c.get('seller')
-    const [menu, customers] = await Promise.all([d.store.listMenu(seller.id), d.store.listCustomers(seller.id)])
-    const ctx = { menu: menu.map(m => m.item), customers: customers.map(x => x.name) }
+    const [menu, customers, orders] = await Promise.all([d.store.listMenu(seller.id), d.store.listCustomers(seller.id), d.store.ordersForMatching(seller.id)])
+    // Names to match a misheard name against: saved customers plus recent walk-in labels ("Abiola").
+    const walkIns = orders.slice(0, 50).map(o => o.label).filter(n => !/^table \d+$/i.test(n))
+    const ctx = { menu: menu.map(m => m.item), customers: [...new Set([...customers.map(x => x.name), ...walkIns])] }
     let cmd = parseCommand(transcript, ctx)
+    log(`[voice] heard "${transcript}"${original && original !== transcript ? ` (said "${original}")` : ''} -> ${cmd.kind}${cmd.kind === 'charge' ? ` ${cmd.label ?? ''} ${cmd.amount ?? ''} ${cmd.item ?? ''}` : ''}`)
     if (original && original !== transcript) {
       // If the translation lost the verb, try the original words too (typed-language aliases).
       if (cmd.kind === 'unknown' && !cmd.reason) cmd = parseCommand(original, ctx)
