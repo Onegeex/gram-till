@@ -8,6 +8,8 @@ A payment lands in your Gram Wallet and **PAID +12 GRAM · Maria** appears in yo
 
 Built for **Heads Up: Even Realities Hackathon** (DoraHacks) · Tracks: **02 Crypto & DeFi** (Gram Wallet) + **01 Messaging & News** (Telegram) · Special: Best Telegram integration.
 
+**Try it:** web https://gram-till.vercel.app · Telegram bot [@GramTillBot](https://t.me/GramTillBot) · glasses app https://gram-till.vercel.app/glasses/ · TON **testnet** (test coins only).
+
 ---
 
 ## ⚠️ What existed before Nov 23, 2026 (rules disclosure)
@@ -17,7 +19,7 @@ The rules ask entrants to say what existed before build week. Honest timeline:
 - **Nov 22 (before kickoff):** idea research, `PLAN.md`, and a **first working prototype** of both parts, built Nov 22 and visible in the git history with timestamps:
   - `server/`: TON payment watcher, order matching, voice grammar, API, customer pay page, Telegram bot (50 unit tests)
   - `app/`: glasses app (till, payment takeover, voice to confirm card, menu, waiting list), tested in the official Even Hub simulator (14 unit tests)
-- **Nov 23–29 (build week):** everything after the Nov 22 commits, including live testnet and Telegram integration on real accounts, polish, deployment, packaging and the demo video. See `git log`.
+- **Nov 23–29 (build week):** everything after the Nov 22 commits. See `git log` and the build-week log below. Highlights: Vercel deployment (Functions + Daemon + Neon Postgres), the live @GramTillBot, the first real testnet payment, and the fixes that real-world testing exposed.
 
 **Open-source code and APIs used:** the official MIT-licensed [`even-realities/evenhub-templates`](https://github.com/even-realities/evenhub-templates) (`minimal` template, used as the starting structure of `app/`); the incoming-payment pattern from the official TON guidebook example ([`ton-org/docs-examples`](https://github.com/ton-org/docs-examples), invoice-based deposits); libraries listed in each `package.json` (`@evenrealities/even_hub_sdk`, `@ton/core`, `@ton/ton`, `@tonconnect/ui`, `grammy`, `hono`, `qrcode`). APIs: Toncenter, Telegram Bot API, Groq (Whisper speech-to-text).
 
@@ -39,7 +41,7 @@ Customer pay page (opens from the Telegram Pay button): [docs/screens/pay-page.p
  G2 glasses ◄─BLE─► Even app (phone) ── WebView: app/  (Vite + TS + Even Hub SDK)
                                              │  HTTPS + SSE
                                              ▼
-                              server/  (Node + TypeScript, Hono, SQLite)
+                     server/  (Node + TypeScript, Hono, Postgres or SQLite)
              ┌────────────────┬─────────────┴────────────┬───────────────────┐
              ▼                ▼                          ▼                   ▼
      Toncenter (read-only:   Telegram Bot API       Whisper STT          Pay page /pay/<code>
@@ -51,7 +53,7 @@ Customer pay page (opens from the Telegram Pay button): [docs/screens/pay-page.p
 2. On the glasses: **tap → speak → tap**, e.g. *"charge Maria twelve"*. The server turns speech into a **confirm card**. **Tap = send**, double-tap = cancel. Nothing is sent without that tap.
 3. The customer gets **"Pay 15 GRAM · Order GT-7F3K"** in Telegram, with a Pay button. It opens the pay page, which offers TON Connect (Gram Wallet, Tonkeeper…), a `ton://` link and a QR. The order code goes into the transfer comment automatically.
 4. The server watches the seller's wallet (read-only). When a transfer arrives whose comment carries the order code and whose amount covers it, the order is **paid**. The glasses show **PAID +12 GRAM · Maria**, the customer gets a receipt, and the seller gets a Telegram DM (so nothing is missed while the glasses app is closed).
-5. Transfers without a known code show as **"MONEY IN · No order code"**, and short payments show as **"SHORT PAYMENT"**. They are never counted as paid.
+5. Transfers without a known code show as **"MONEY IN · No order code"**, and short payments show as **"SHORT PAYMENT"** with what's still owed. They are never counted as paid. The pay page then asks only for the balance, and a top-up completes the order.
 
 **Glasses controls:** tap, then just speak: it sends when you pause (or tap again to finish) · swipe = menu (repeat last, waiting orders, remind all, today's total) · double-tap = back / exit.
 
@@ -80,8 +82,23 @@ Customer pay page (opens from the Telegram Pay button): [docs/screens/pay-page.p
 
 ## Live
 
-**https://gram-till.vercel.app** (TON testnet). Glasses app: `https://gram-till.vercel.app/glasses/`.
-Hosted on Vercel: the API runs as Vercel Functions, the wallet watcher as a Vercel Daemon, and both share a Neon Postgres database (`vercel.json`).
+**https://gram-till.vercel.app** (TON testnet) · bot **[@GramTillBot](https://t.me/GramTillBot)** · glasses app `https://gram-till.vercel.app/glasses/`.
+Hosted on Vercel: the API runs as Vercel Functions, the wallet watcher as a Vercel Daemon, and both share a Neon Postgres database (`vercel.json`). Telegram runs in webhook mode.
+
+**First real payment (Nov 24):** shop *Corner Coffee* charged 1 GRAM (order `GT-DWF7`) from the bot, a real testnet transfer carrying the code arrived, the watcher marked it paid, and the seller got the Telegram alert. Wallet on [testnet Tonviewer](https://testnet.tonviewer.com/0QCOmFghR0fSUPi9us4Lc4g-XdS8Z1TipSloAqopL-QVxAGc).
+
+## Build-week log: what real testing found
+
+Unit tests passed before any of these. Running on real accounts, the real chain and a real speech model is what surfaced them:
+
+| Found live | Fix |
+|---|---|
+| Every watcher poll failed: Toncenter testnet *archive* nodes were down ("no workers available"), so a real payment went unseen | Ask regular nodes first, archive only as fallback; on first sight, catch up transfers that pay a currently-waiting order (unrelated history is still never replayed) |
+| A short payment left the order stuck: the pay page kept asking for the full amount and a top-up was judged alone | Part-payments add up; page, QR and wallet links ask for the balance; seller alert says what's still owed |
+| Whisper heard "Charge **table four**, two" for "Charge Abiola two": it copied example sentences from the speech hint | Hint with the seller's own words only (customers, recent order names, menu) |
+| Whisper writes "table four" as "table **for**" | Number homophones mapped only where a number is the only sensible reading ("Charge Maria for two lattes" keeps its meaning) |
+| "Table four, two lattes" on a shop with no menu became a 2 GRAM charge | Never drop an unpriced item; ask the seller to price it with `/menu` |
+| Vercel couldn't type-check with TypeScript 7 | Server pinned to TypeScript 5.9 on Node 24 |
 
 ## Run it (Mac)
 
@@ -115,12 +132,13 @@ Then in Telegram: open your bot → **/start** → shop name → paste your **te
 
 **Seed a demo shop without Telegram:** `cd server && DB_PATH=./data/gramtill.db npm run seed -- <wallet-address>` prints a pairing code.
 
-**Real glasses:** `npx evenhub qr --url http://<your-mac-ip>:5173`, scan it from the Even app (developer mode). Package with `npm run pack` (put your server URL in `app/app.json` → `permissions` → `network.whitelist` first).
+**Real glasses:** `npx evenhub qr --url http://<your-mac-ip>:5173`, scan it from the Even app (developer mode). Package with `cd app && npm run pack`: it builds against `https://gram-till.vercel.app` (override with `VITE_SERVER_URL=…`, and update `app.json` → `permissions` → `network.whitelist` to match) and writes `gram-till.ehpk`.
 
 ## Tests
 
 ```bash
-cd server && npm test      # 76 tests: amounts, order matching, TON parsing, watcher, voice grammar (8 languages, fiat refusal), STT flow, API, pay page
+cd server && npm test      # 88 tests: amounts, order matching, part-payments, TON parsing, watcher (incl. first-sight catch-up), voice grammar (8 languages, fiat refusal, homophones), STT flow, API, pay page
+TEST_DATABASE_URL=postgres://… npm test   # same suite against Postgres (as deployed)
 cd app && npm test         # 24 tests: lens state machine, payment takeover, gestures, end-of-speech detection on real speech
 ```
 
@@ -136,8 +154,9 @@ server/src/
   stt.ts         mic PCM → WAV → Whisper
   service.ts     till operations shared by the glasses API and the bot
   api.ts         REST + SSE + pay page + one-shot confirmations
-  bot.ts         Telegram bot (grammY)
-  db.ts          SQLite (node:sqlite, no native modules)
+  bot.ts         Telegram bot (grammY), webhook on Vercel / long polling locally
+  store/         TillStore: Postgres (pg.ts, deployed) and SQLite (sqlite.ts, local; node:sqlite)
+  app.ts         Vercel Functions entry · worker.ts  Vercel Daemon (wallet watcher) · local.ts  all-in-one local server
 app/src/
   controller.ts  lens state machine (till, listening, confirm, payment takeover, menus)
   display.ts     Even Hub SDK wrapper (serialized bridge calls) + gesture normalisation

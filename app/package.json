@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "simulate": "evenhub-simulator http://localhost:5173",
-    "pack": "npm run build && evenhub pack app.json dist -o gram-till.ehpk",
+    "pack": "rm -rf dist && VITE_SERVER_URL=${VITE_SERVER_URL:-https://gram-till.vercel.app} npm run build && evenhub pack app.json dist -o gram-till.ehpk --sdk-ver 0.0.16",
     "build:web": "node scripts/copy-static.mjs && tsc --noEmit && GLASSES_BASE=/glasses/ GLASSES_OUT=dist/glasses vite build && cp site/index.html dist/index.html && cp -r public/static dist/static"
   },
   "dependencies": {
