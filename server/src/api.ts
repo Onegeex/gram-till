@@ -225,7 +225,8 @@ export function buildApi(d: ApiDeps) {
         ...d.stt,
         // The prompt only biases spelling of the seller's own words. No example sentences: Whisper
         // copies them ("Charge table four, two..." heard for "Charge Abiola two").
-        prompt: vocab.length ? (seller.language === 'en' ? `Charge, remind, cancel. ${vocab.join(', ')}.` : `${vocab.join(', ')}.`) : undefined,
+        // Number words help accented "five"/"one" land as numbers instead of "Swift"/"won".
+        prompt: seller.language === 'en' ? `Charge, remind, cancel. One, two, three, four, five, six, seven, eight, nine, ten, twelve, fifteen, twenty. ${vocab.join(', ')}.` : vocab.length ? `${vocab.join(', ')}.` : undefined,
       })
       if (!heard.english && !heard.original) return c.json({ transcript: '', action: 'error', message: "Didn't hear anything", examples: EXAMPLES })
       return interpret(c, heard.english || heard.original, heard.language === 'en' ? undefined : heard.original)

@@ -201,8 +201,35 @@ describe('accented speech', () => {
   })
   it('never turns a name or random first word into a command', () => {
     expect(parseCommand('Chad twelve', { menu: [], customers: [] }).kind).toBe('charge') // close enough to "charge"; the confirm card shows it
-    expect(parseCommand('Maria twelve', ctx).kind).toBe('unknown')
+    expect(parseCommand('Maria twelve', ctx)).toMatchObject({ kind: 'charge', label: 'Maria', amount: 12 }) // clipped "charge" + known name
+    expect(parseCommand('Hello twelve', ctx).kind).toBe('unknown')
+    expect(parseCommand('Maria is here', ctx).kind).toBe('unknown')
     expect(parseCommand('cancer', ctx).kind).toBe('unknown')
+  })
+})
+
+describe('real accented transcripts (Nov 24 live test)', () => {
+  const ctx = { menu: ['latte'], customers: ['Abiola', 'Maria'] }
+  const cases: [string, { label: string; amount: number }][] = [
+    ['Charge, Maria, Swift.', { label: 'Maria', amount: 5 }],
+    ['Touch, Maria, Swift.', { label: 'Maria', amount: 5 }],
+    ['Taji, Maria, Swift.', { label: 'Maria', amount: 5 }],
+    ['Tadj, Maira, Swift.', { label: 'Maria', amount: 5 }],
+    ['Tadj, Mária, Swift.', { label: 'Maria', amount: 5 }],
+    ['Charge, Maria Swift.', { label: 'Maria', amount: 5 }],
+    ['Aria, want.', { label: 'Maria', amount: 1 }],
+    ['Charge, Abiola, won.', { label: 'Abiola', amount: 1 }],
+    ['Charge, Maria, 5.', { label: 'Maria', amount: 5 }],
+    ['Charge, Abiola, 1.', { label: 'Abiola', amount: 1 }],
+  ]
+  for (const [heard, want] of cases)
+    it(`"${heard}"`, () => expect(parseCommand(heard, ctx)).toMatchObject({ kind: 'charge', ...want }))
+
+  it('still refuses when no amount was heard', () => {
+    expect(parseCommand('Charge, Abyola.', ctx).kind).toBe('unknown')
+  })
+  it('does not treat a name that sounds like a number as the amount', () => {
+    expect(parseCommand('Charge Tin twelve', { menu: [], customers: ['Tin'] })).toMatchObject({ label: 'Tin', amount: 12 })
   })
 })
 

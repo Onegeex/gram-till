@@ -56,7 +56,7 @@ describe('/api/voice', () => {
     const r = await voice()
     expect(calls.prompts[0]).toContain('Abiola')
     expect(calls.prompts[0]).toContain('latte')
-    expect(calls.prompts[0]).not.toMatch(/table four|twelve/i)
+    expect(calls.prompts[0]).not.toMatch(/table four|charge maria/i)
     expect(r.confirm).toMatchObject({ label: 'Abiola', amount: '2' })
   })
 

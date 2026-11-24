@@ -194,11 +194,21 @@ export function tokenize(text: string): string[] {
     .map(t => ALIASES[t] ?? t)
 }
 
+/** Words speech-to-text writes for a spoken number at the end of a command (accents). */
+const FINAL_NUMBER: Record<string, string> = {
+  won: '1', wan: '1', want: '1', wun: '1', to: '2', too: '2', tu: '2', tree: '3', free: '3', fo: '4', foh: '4',
+  swift: '5', fife: '5', fiv: '5', faiv: '5', fayv: '5', sics: '6', seeks: '6', ate: '8', nain: '9', tin: '10',
+}
+
+/** "Charge" as Whisper has written it for real accented speakers (first word only). */
+const CHARGE_LIKE = new Set(['touch', 'tadj', 'taji', 'tache', 'tach', 'tatch', 'chaj', 'chadj', 'charj', 'shaj', 'chaji', 'chaje', 'charged', 'charges'])
+
 /** A mangled command verb at the start of a spoken command, e.g. "cha", "charj", "chaj", "shaj", "remaind". */
 export function soundsLikeVerb(word: string): string | null {
   const w = fold(word.toLowerCase())
   // Normalise the sounds accents swap: sh/j at the start -> ch, a final j -> rge ("shaj", "chaj" ~ "charge").
-  const c = w.replace(/^(sh|j)/, 'ch').replace(/j$/, 'rge')
+  if (CHARGE_LIKE.has(w)) return 'charge'
+  const c = w.replace(/^(tch|sh|j|t)/, 'ch').replace(/(dj|dge|ji|j)$/, 'rge')
   if (/^cha[a-z]{0,5}$/.test(c) && levenshtein(c, 'charge') <= 3) return 'charge'
   if (/^r[ei]m[a-z]*$/.test(w) && levenshtein(w, 'remind') <= 2) return 'remind'
   if (/^ca?n[a-z]*$/.test(w) && w !== 'can' && levenshtein(w, 'cancel') <= 2 && w !== 'cancer') return 'cancel'
@@ -247,6 +257,16 @@ export function parseCommand(text: string, ctx: VoiceContext): Command {
     verb = soundsLikeVerb(raw[0]) ?? undefined
     if (verb) verbIdx = 0
   }
+  if (verb === undefined && raw.length > 1 && fuzzyPick(raw[0], ctx.customers)) {
+    // The first word was clipped ("Aria, want" for "Charge Maria one"): a known customer's name
+    // followed by an amount is a charge. The seller still sees and confirms the card.
+    const tail = raw[raw.length - 1]
+    if (isNum(tail) || tail in FINAL_NUMBER || wordsToNumbers(raw.slice(1)).some(isNum)) {
+      verb = 'charge'
+      raw.unshift('charge')
+      verbIdx = 0
+    }
+  }
   if (verb === undefined || verbIdx === -1) return { kind: 'unknown', text }
   if (verb === 'charge') {
     const menuWords = new Set(ctx.menu.flatMap(m => tokenize(m)))
@@ -275,7 +295,12 @@ export function parseCommand(text: string, ctx: VoiceContext): Command {
   // right after "table" ("table for two lattes" = table 4), and a final "too"/"to" ("charge Abiola too").
   const HOMOPHONE: Record<string, string> = { for: '4', fore: '4', to: '2', too: '2', tree: '3', free: '3', ate: '8', won: '1' }
   rest = rest.map((t, i) => (i > 0 && (rest[i - 1] === 'table' || rest[i - 1] === 'tables') && HOMOPHONE[t] ? HOMOPHONE[t] : t))
-  if (rest.length > 1 && (rest[rest.length - 1] === 'too' || rest[rest.length - 1] === 'to') && !rest.some(isNum)) rest = [...rest.slice(0, -1), '2']
+  // A sound-alike as the LAST word, when no number was heard at all: that word is the amount.
+  // From real accented speech: "Charge Maria Swift" = five, "Charge Abiola won/wan/want" = one.
+  const last = rest[rest.length - 1]
+  if (rest.length > 1 && !rest.some(isNum) && last in FINAL_NUMBER && !fuzzyPick(last, [...ctx.customers, ...ctx.menu])) {
+    rest = [...rest.slice(0, -1), FINAL_NUMBER[last]]
+  }
 
   // Split off "for <qty?> <item>" suffix.
   let item: string | null = null
