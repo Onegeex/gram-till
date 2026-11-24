@@ -12,7 +12,7 @@ import { processIncoming, type PaymentListener } from './processor.js'
 import { isError, type ChargePreview, type TillService } from './service.js'
 import type { PendingAction, Seller, StoredEvent, TillStore } from './store/index.js'
 import { pcmToWav, understandSpeech, type SttOptions } from './stt.js'
-import { EXAMPLES, parseCommand, reconcileWithOriginal } from './voice.js'
+import { EXAMPLES, firstCommand, parseCommand, reconcileWithOriginal } from './voice.js'
 
 const CONFIRM_TTL_SEC = 20
 
@@ -154,6 +154,11 @@ export function buildApi(d: ApiDeps) {
    */
   async function interpret(c: Context<Env>, transcript: string, original?: string) {
     const seller = c.get('seller')
+    // One command per tap: if two were spoken in one go, only the first is used (and we say so).
+    const first = firstCommand(transcript)
+    const extra = first.more ? ' (one at a time: only the first command was used)' : ''
+    transcript = first.text
+    if (original) original = firstCommand(original).text
     const [menu, customers, orders] = await Promise.all([d.store.listMenu(seller.id), d.store.listCustomers(seller.id), d.store.ordersForMatching(seller.id)])
     // Names to match a misheard name against: saved customers plus recent walk-in labels ("Abiola").
     const walkIns = orders.slice(0, 50).map(o => o.label).filter(n => !/^table \d+$/i.test(n))
@@ -166,6 +171,7 @@ export function buildApi(d: ApiDeps) {
       cmd = reconcileWithOriginal(cmd, original, ctx)
     }
     if (original) transcript = original
+    transcript += extra
     switch (cmd.kind) {
       case 'charge':
       case 'repeat': {

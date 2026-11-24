@@ -233,3 +233,15 @@ describe('real accented transcripts (Nov 24 live test)', () => {
   })
 })
 
+describe('one command per tap', () => {
+  const ctx = { menu: ['latte'], customers: ['Abiola', 'Maria'] }
+  it('uses only the first of two spoken commands (never mixes their names and amounts)', () => {
+    expect(parseCommand('Tad, Maria Five. Tad, Abiola Two.', ctx)).toMatchObject({ kind: 'charge', label: 'Maria', amount: 5 })
+    expect(parseCommand('Maria, five. Tag, Abiola, one.', ctx)).toMatchObject({ kind: 'charge', label: 'Maria', amount: 5 })
+    expect(parseCommand('Tad, Maria, once. Tad, Abiola, done.', ctx)).toMatchObject({ kind: 'charge', label: 'Maria', amount: 1 })
+  })
+  it('keeps decimals intact', () => {
+    expect(parseCommand('Charge Maria 12.50.', ctx)).toMatchObject({ kind: 'charge', label: 'Maria', amount: 12.5 })
+  })
+})
+

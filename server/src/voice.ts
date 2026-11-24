@@ -196,12 +196,12 @@ export function tokenize(text: string): string[] {
 
 /** Words speech-to-text writes for a spoken number at the end of a command (accents). */
 const FINAL_NUMBER: Record<string, string> = {
-  won: '1', wan: '1', want: '1', wun: '1', to: '2', too: '2', tu: '2', tree: '3', free: '3', fo: '4', foh: '4',
+  won: '1', wan: '1', want: '1', wun: '1', once: '1', done: '1', to: '2', too: '2', tu: '2', tree: '3', free: '3', fo: '4', foh: '4',
   swift: '5', fife: '5', fiv: '5', faiv: '5', fayv: '5', sics: '6', seeks: '6', ate: '8', nain: '9', tin: '10',
 }
 
 /** "Charge" as Whisper has written it for real accented speakers (first word only). */
-const CHARGE_LIKE = new Set(['touch', 'tadj', 'taji', 'tache', 'tach', 'tatch', 'chaj', 'chadj', 'charj', 'shaj', 'chaji', 'chaje', 'charged', 'charges'])
+const CHARGE_LIKE = new Set(['tad', 'tag', 'tadge', 'touch', 'tadj', 'taji', 'tache', 'tach', 'tatch', 'chaj', 'chadj', 'charj', 'shaj', 'chaji', 'chaje', 'charged', 'charges'])
 
 /** A mangled command verb at the start of a spoken command, e.g. "cha", "charj", "chaj", "shaj", "remaind". */
 export function soundsLikeVerb(word: string): string | null {
@@ -247,7 +247,18 @@ export function fuzzyPick(phrase: string, options: string[]): string | null {
 
 const titleCase = (s: string) => s.replace(/(^|\s)(\p{L})/gu, (_, sp, c) => sp + c.toUpperCase())
 
-export function parseCommand(text: string, ctx: VoiceContext): Command {
+/**
+ * One command per tap. If several sentences were spoken in one go ("Charge Maria five. Charge
+ * Abiola two."), only the first one counts; mixing them could put one person's amount on another.
+ * Splits only on sentence ends followed by a space, so "12.50" stays one number.
+ */
+export function firstCommand(text: string): { text: string; more: boolean } {
+  const parts = text.split(/(?<=[.!?;])\s+/).map(p => p.trim()).filter(p => /[\p{L}\p{N}]/u.test(p))
+  return parts.length > 1 ? { text: parts[0], more: true } : { text, more: false }
+}
+
+export function parseCommand(input: string, ctx: VoiceContext): Command {
+  const text = firstCommand(input).text
   const raw = tokenize(text)
   let verbIdx = raw.findIndex(t => t in VERB_ALIASES)
   let verb = verbIdx === -1 ? undefined : VERB_ALIASES[raw[verbIdx]]
