@@ -210,12 +210,19 @@ export function buildApi(d: ApiDeps) {
     if (d.voiceDebugDir) writeFileSync(join(d.voiceDebugDir, 'last-voice.wav'), pcmToWav(pcm))
     try {
       const seller = c.get('seller')
-      const [customers, menu] = await Promise.all([d.store.listCustomers(seller.id), d.store.listMenu(seller.id)])
-      const vocab = [...customers.map(x => x.name), ...menu.map(m => m.item)].slice(0, 40)
+      const [customers, menu, orders] = await Promise.all([
+        d.store.listCustomers(seller.id),
+        d.store.listMenu(seller.id),
+        d.store.ordersForMatching(seller.id),
+      ])
+      // Names the seller actually uses: saved customers plus labels of recent orders (e.g. walk-ins).
+      const names = [...customers.map(x => x.name), ...orders.slice(0, 50).map(o => o.label)].filter(n => !/^table \d+$/i.test(n))
+      const vocab = [...new Set([...names, ...menu.map(m => m.item)])].slice(0, 40)
       const heard = await understandSpeech(pcm, seller.language, {
         ...d.stt,
-        // The prompt only biases spelling (names, menu words); keep it short and in the seller's terms.
-        prompt: seller.language === 'en' ? `Charge Maria twelve. Charge table four, two lattes. ${vocab.join(', ')}` : vocab.join(', '),
+        // The prompt only biases spelling of the seller's own words. No example sentences: Whisper
+        // copies them ("Charge table four, two..." heard for "Charge Abiola two").
+        prompt: vocab.length ? (seller.language === 'en' ? `Charge, remind, cancel. ${vocab.join(', ')}.` : `${vocab.join(', ')}.`) : undefined,
       })
       if (!heard.english && !heard.original) return c.json({ transcript: '', action: 'error', message: "Didn't hear anything", examples: EXAMPLES })
       return interpret(c, heard.english || heard.original, heard.language === 'en' ? undefined : heard.original)
