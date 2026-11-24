@@ -129,8 +129,26 @@ describe('API', () => {
     expect(html).toContain(`ton://transfer/${ADDR}?amount=15000000000&amp;text=${order.code}`)
     expect(html).toContain("Mama T&#39;s Kitchen") // escaped
     await processIncoming(s.store, s.seller.id, { txHash: 't1', from: null, amountNano: toNano('15'), comment: order.code, utime: Math.floor(Date.now() / 1000) })
-    expect(await (await s.app.request(`/pay/${order.code}/status`)).json()).toEqual({ status: 'paid', expired: false })
+    expect(await (await s.app.request(`/pay/${order.code}/status`)).json()).toEqual({ status: 'paid', expired: false, due: '15' })
     expect((await s.app.request('/pay/GT-NOPE')).status).toBe(404)
+  })
+})
+
+describe('part-payments', () => {
+  it('asks only for the balance after a short payment, and a top-up completes the order', async () => {
+    const s = await setup()
+    const order = await s.store.createOrder({ sellerId: s.seller.id, label: 'Tunde', amountNano: toNano('15') })
+    const now = Math.floor(Date.now() / 1000)
+    const first = await processIncoming(s.store, s.seller.id, { txHash: 'p1', from: null, amountNano: toNano('10'), comment: order.code, utime: now })
+    expect(first).toMatchObject({ result: 'underpaid', shortNano: toNano('5') })
+    const html = await (await s.app.request(`/pay/${order.code}`)).text()
+    expect(html).toContain('5 GRAM')
+    expect(html).toContain('10 of 15 GRAM already received')
+    expect(html).toContain(`amount=5000000000&amp;text=${order.code}`)
+    expect(await (await s.app.request(`/pay/${order.code}/status`)).json()).toMatchObject({ status: 'waiting', due: '5' })
+    const second = await processIncoming(s.store, s.seller.id, { txHash: 'p2', from: null, amountNano: toNano('5'), comment: order.code, utime: now })
+    expect(second?.result).toBe('paid')
+    expect((await s.store.getOrder(order.id))!.status).toBe('paid')
   })
 })
 

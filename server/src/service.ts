@@ -106,11 +106,12 @@ export class TillService {
     return `${this.cfg.publicUrl}/pay/${order.code}`
   }
 
-  payLinks(seller: Seller, order: Order) {
+  /** Wallet links ask for `dueNano` (the remaining balance after any part-payment), default the full amount. */
+  payLinks(seller: Seller, order: Order, dueNano: bigint = order.amountNano) {
     return {
       page: this.payUrl(order),
-      ton: tonTransferLink(seller.address, order.amountNano, order.code, order.expiresAt),
-      tonkeeper: tonkeeperLink(seller.address, order.amountNano, order.code),
+      ton: tonTransferLink(seller.address, dueNano, order.code, order.expiresAt),
+      tonkeeper: tonkeeperLink(seller.address, dueNano, order.code),
     }
   }
 
@@ -205,17 +206,21 @@ export class TillService {
     if (!order) return null
     const seller = (await this.store.getSeller(order.sellerId))!
     const now = Math.floor(Date.now() / 1000)
+    const paidSoFar = order.status === 'waiting' ? await this.store.partialPaidNano(order.id) : 0n
+    const due = paidSoFar > 0n && paidSoFar < order.amountNano ? order.amountNano - paidSoFar : order.amountNano
     return {
       shop: seller.name,
       code: order.code,
       item: order.item,
-      amount: fromNano(order.amountNano),
-      amountNano: order.amountNano.toString(),
+      amount: fromNano(due), // what to pay now
+      amountNano: due.toString(),
+      total: fromNano(order.amountNano),
+      paidSoFar: paidSoFar > 0n ? fromNano(paidSoFar) : null,
       status: order.status,
       expired: order.status === 'waiting' && now > order.expiresAt,
       address: seller.address,
       network: this.cfg.network,
-      links: this.payLinks(seller, order),
+      links: this.payLinks(seller, order, due),
     }
   }
 }

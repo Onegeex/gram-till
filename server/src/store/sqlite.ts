@@ -294,6 +294,11 @@ export class SqliteStore implements TillStore {
     return Number(r.changes) > 0
   }
 
+  async partialPaidNano(orderId: number): Promise<bigint> {
+    const rows = this.db.prepare("SELECT amount_nano FROM payments WHERE order_id = ? AND result = 'underpaid'").all(orderId) as any[]
+    return rows.reduce((a, r) => a + BigInt(r.amount_nano), 0n)
+  }
+
   async recentPayments(sellerId: number, limit = 10): Promise<PaymentRow[]> {
     return (this.db.prepare('SELECT * FROM payments WHERE seller_id = ? ORDER BY utime DESC LIMIT ?').all(sellerId, limit) as any[]).map(toPayment)
   }

@@ -289,6 +289,11 @@ export class PgStore implements TillStore {
     return r.length > 0
   }
 
+  async partialPaidNano(orderId: number): Promise<bigint> {
+    const rows = await this.sql`SELECT amount_nano FROM payments WHERE order_id = ${orderId} AND result = 'underpaid'`
+    return rows.reduce((a, r) => a + BigInt(r.amount_nano), 0n)
+  }
+
   async recentPayments(sellerId: number, limit = 10): Promise<PaymentRow[]> {
     return (await this.sql`SELECT * FROM payments WHERE seller_id = ${sellerId} ORDER BY utime DESC LIMIT ${limit}`).map(toPayment)
   }

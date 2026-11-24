@@ -82,7 +82,7 @@ export class TelegramOut {
           e.result === 'unmatched'
             ? 'no order code'
             : e.result === 'underpaid'
-              ? `short for ${e.order?.code}`
+              ? `part-payment for ${e.order?.code}, still owes ${e.shortNano !== null ? fromNano(e.shortNano) : '?'} GRAM`
               : e.result === 'already_paid'
                 ? `extra payment for ${e.order?.code}`
                 : `for cancelled ${e.order?.code}`

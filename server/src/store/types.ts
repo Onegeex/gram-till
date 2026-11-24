@@ -107,6 +107,8 @@ export interface TillStore {
   hasPayment(txHash: string): Promise<boolean>
   /** Returns false if this tx hash was already recorded (idempotency across processes). */
   recordPayment(p: PaymentRow): Promise<boolean>
+  /** Sum of part-payments ('underpaid' results) already received for an order. */
+  partialPaidNano(orderId: number): Promise<bigint>
   recentPayments(sellerId: number, limit?: number): Promise<PaymentRow[]>
   todayTotals(sellerId: number, dayStart: number): Promise<{ totalNano: bigint; paidCount: number; unmatched: number; waiting: number }>
 

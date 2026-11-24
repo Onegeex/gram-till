@@ -287,7 +287,7 @@ export function buildApi(d: ApiDeps) {
   app.get('/pay/:code/status', async c => {
     const info = await d.service.payInfo(c.req.param('code'))
     if (!info) return c.json({ error: 'not found' }, 404)
-    return c.json({ status: info.status, expired: info.expired })
+    return c.json({ status: info.status, expired: info.expired, due: info.amount })
   })
 
   app.get('/tonconnect-manifest.json', c => c.json({ url: d.publicUrl, name: 'Gram Till', iconUrl: `${d.publicUrl}/static/icon.png` }))
@@ -305,6 +305,15 @@ export function buildApi(d: ApiDeps) {
         drop_pending_updates: true,
       })
       await d.bot!.api.setMyCommands(BOT_COMMANDS)
+      // What people see on the bot's profile and before pressing Start.
+      await d.bot!.api.setMyShortDescription('Hands-free till for Telegram sellers. Charge by voice on Even G2 glasses, get paid in GRAM on TON.')
+      await d.bot!.api.setMyDescription(
+        'Gram Till turns your Telegram into a till.\n\n' +
+          'Sellers: say "Charge Maria twelve" on your Even G2 glasses (or type it), and your customer gets a pay button right here. ' +
+          'You see "Paid" the moment the GRAM lands in your wallet.\n\n' +
+          'Customers: tap Pay, confirm in your wallet, and your receipt arrives in this chat.\n\n' +
+          (d.service.network === 'testnet' ? 'This is the TESTNET demo: test coins only.' : 'Payments go straight to the seller\'s own wallet.'),
+      )
       const me = await d.bot!.api.getMe()
       return c.json({ ok: true, bot: `@${me.username}`, webhook: `${d.publicUrl}/telegram/webhook` })
     })

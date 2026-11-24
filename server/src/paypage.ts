@@ -15,6 +15,9 @@ export interface PayInfo {
   item: string | null
   amount: string
   amountNano: string
+  /** Full order amount, and what earlier part-payments covered (null when none). */
+  total?: string
+  paidSoFar?: string | null
   status: string
   expired: boolean
   address: string
@@ -65,6 +68,7 @@ export async function renderPayPage(info: PayInfo, publicUrl: string): Promise<s
     ${info.network === 'testnet' ? '<span class="net">TESTNET · test coins only</span>' : ''}
     <div class="shop">${esc(info.shop)}</div>
     <div class="amount">${esc(info.amount)} GRAM</div>
+    ${info.paidSoFar && info.total ? `<div class="small">Balance due · ${esc(info.paidSoFar)} of ${esc(info.total)} GRAM already received</div>` : ''}
     ${info.item ? `<div class="item">${esc(info.item)}</div>` : ''}
     <div class="small">Order <span class="code">${esc(info.code)}</span></div>
 
@@ -120,6 +124,7 @@ export async function renderPayPage(info: PayInfo, publicUrl: string): Promise<s
         const s = await r.json();
         if (s.status === 'paid') { show('paid'); try { Telegram.WebApp.HapticFeedback.notificationOccurred('success') } catch (e) {} return; }
         if (s.status === 'cancelled' || s.expired) { show('closed'); return; }
+        if (s.due && s.due !== ${JSON.stringify(info.amount)}) { location.reload(); return; } // a part-payment arrived
       }
     } catch (e) {}
     setTimeout(poll, 3000);
