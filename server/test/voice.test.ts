@@ -172,3 +172,15 @@ describe('reconcileWithOriginal (spoken non-English)', () => {
     expect(reconcileWithOriginal(english, 'Cobra mesa três, oito', ctx)).toMatchObject({ label: 'Table 3', amount: 8 })
   })
 })
+
+describe('speech-to-text homophones', () => {
+  const ctx = { menu: ['latte'], customers: [] as string[] }
+  it('reads "table for" as table 4', () => {
+    expect(parseCommand('Charge table for two lattes.', ctx)).toMatchObject({ kind: 'charge', label: 'Table 4', item: 'latte', qty: 2 })
+    expect(parseCommand('Charge table for, twelve.', ctx)).toMatchObject({ kind: 'charge', label: 'Table 4', amount: 12 })
+  })
+  it('reads a final "too" as two, but keeps "for" in "for two lattes"', () => {
+    expect(parseCommand('Charge Abiola too.', ctx)).toMatchObject({ kind: 'charge', label: 'Abiola', amount: 2 })
+    expect(parseCommand('Charge Maria for two lattes', ctx)).toMatchObject({ kind: 'charge', label: 'Maria', item: 'latte', qty: 2 })
+  })
+})

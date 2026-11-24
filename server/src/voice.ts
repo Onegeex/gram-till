@@ -254,6 +254,12 @@ export function parseCommand(text: string, ctx: VoiceContext): Command {
   }
 
   // ---- charge ----
+  // Speech-to-text homophones for numbers. Only where a number is the only sensible reading:
+  // right after "table" ("table for two lattes" = table 4), and a final "too"/"to" ("charge Abiola too").
+  const HOMOPHONE: Record<string, string> = { for: '4', fore: '4', to: '2', too: '2', tree: '3', free: '3', ate: '8', won: '1' }
+  rest = rest.map((t, i) => (i > 0 && (rest[i - 1] === 'table' || rest[i - 1] === 'tables') && HOMOPHONE[t] ? HOMOPHONE[t] : t))
+  if (rest.length > 1 && (rest[rest.length - 1] === 'too' || rest[rest.length - 1] === 'to') && !rest.some(isNum)) rest = [...rest.slice(0, -1), '2']
+
   // Split off "for <qty?> <item>" suffix.
   let item: string | null = null
   let qty = 1
@@ -275,7 +281,7 @@ export function parseCommand(text: string, ctx: VoiceContext): Command {
   const tableIdx = rest.findIndex(t => t === 'table' || t === 'tables')
   if (tableIdx !== -1) {
     const n = rest[tableIdx + 1]
-    const num = n === 'for' ? '4' : n
+    const num = n
     if (num && /^\d+$/.test(num)) {
       label = `Table ${num}`
       rest = [...rest.slice(0, tableIdx), ...rest.slice(tableIdx + 2)]
