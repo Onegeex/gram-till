@@ -37,7 +37,7 @@ type Screen =
   | { kind: 'order'; order: WaitingOrder }
   | { kind: 'listening'; startedAt: number; chunks: Uint8Array[]; vad: Vad }
   | { kind: 'thinking'; transcript?: string }
-  | { kind: 'confirm'; confirm: Confirm }
+  | { kind: 'confirm'; confirm: Confirm; startedAt: number }
   | { kind: 'message'; text: string; examples?: string[] }
   | { kind: 'payment'; event: PaymentEvent; back: Screen }
 
@@ -54,6 +54,8 @@ export class Vad {
   private speechMs = 0
   private silenceMs = 0
   heardSpeech = false
+  /** Live loudness above the room, 0..1 (drives the lens mic meter). */
+  level = 0
 
   constructor(private opts = { minLevel: 400, factor: 3, windowMs: 1500, minSpeechMs: 200, endSilenceMs: 900 }) {}
 
@@ -79,6 +81,8 @@ export class Vad {
     const rms = Math.sqrt(sum / n)
     const ms = n / 16
     const threshold = Math.max(this.opts.minLevel, this.floor() * this.opts.factor)
+    const room = Math.max(this.opts.minLevel / this.opts.factor, Math.min(this.floor(), rms))
+    this.level = Math.max(0, Math.min(1, Math.log10(Math.max(rms, 1) / room) / 1.3))
     this.window.push({ rms, ms })
     this.windowMs += ms
     while (this.window.length > 1 && this.windowMs - this.window[0].ms >= this.opts.windowMs) this.windowMs -= this.window.shift()!.ms
@@ -108,6 +112,7 @@ export class TillController {
   /** Set by the companion page when the user wants voice-free testing. */
   onTranscript?: (text: string) => void
   private timer: ReturnType<typeof setTimeout> | null = null
+  private lastMeterAt = 0
   private ticker: ReturnType<typeof setInterval> | null = null
   private queuedPayments: PaymentEvent[] = []
   private lastListKey = ''
@@ -151,7 +156,11 @@ export class TillController {
     if (g.kind === 'audio') {
       if (s.kind === 'listening') {
         s.chunks.push(g.pcm)
-        if (s.vad.push(g.pcm)) void this.stopListening('auto') // speaker paused: send
+        if (s.vad.push(g.pcm)) return void this.stopListening('auto') // speaker paused: send
+        if (Date.now() - this.lastMeterAt > 300) {
+          this.lastMeterAt = Date.now()
+          void this.render() // live mic meter (only the changed parts are redrawn)
+        }
       }
       return
     }
@@ -234,7 +243,7 @@ export class TillController {
       if (this.screen.kind !== 'listening') return this.clearTicker()
       const left = MAX_LISTEN_SEC - Math.floor((Date.now() - this.screen.startedAt) / 1000)
       if (left <= 0) void this.stopListening('auto')
-      else void this.display.text(listeningCard(left))
+      else void this.render()
     }, 1000)
   }
 
@@ -262,7 +271,7 @@ export class TillController {
     try {
       const r = await call()
       if (r.transcript) this.onTranscript?.(r.transcript)
-      if (r.action === 'confirm' && r.confirm) return this.go({ kind: 'confirm', confirm: r.confirm })
+      if (r.action === 'confirm' && r.confirm) return this.go({ kind: 'confirm', confirm: r.confirm, startedAt: Date.now() })
       if (r.action === 'done') return this.message(r.message ?? 'Done')
       return this.message(r.message ?? "Didn't catch that", r.examples)
     } catch (err) {
@@ -331,6 +340,17 @@ export class TillController {
     this.timer = null
     if (next.kind !== 'listening') this.clearTicker()
     this.screen = next
+    if (next.kind === 'confirm') {
+      // Visible countdown; when it runs out the request is dropped (the server would refuse it anyway).
+      this.ticker = setInterval(() => {
+        if (this.screen !== next) return this.clearTicker()
+        if (this.confirmLeft(next) <= 0) {
+          this.clearTicker()
+          void this.api.discard(next.confirm.id)
+          void this.message('Timed out, not sent')
+        } else void this.render()
+      }, 1000)
+    }
     if (next.kind !== 'menu' && next.kind !== 'waiting' && next.kind !== 'order') this.lastListKey = '' // display is back in text layout
     // Payments that arrived mid-voice/confirm are shown as soon as we're back on a passive screen.
     if (INTERRUPTIBLE.has(next.kind) && next.kind !== 'message' && this.queuedPayments.length) {
@@ -345,26 +365,30 @@ export class TillController {
     const snap = this.snapshot
     switch (s.kind) {
       case 'unpaired':
-        return this.display.text(unpairedCard())
+        return this.display.card(unpairedCard())
       case 'till':
-        return this.display.text(snap ? (this.online ? tillCard(snap) : offlineCard(snap.seller.name)) : offlineCard())
+        return this.display.card(snap ? (this.online ? tillCard(snap) : offlineCard(snap)) : offlineCard())
       case 'menu':
-        return this.listOnce('GRAM TILL  |  menu  (2x tap = back)', menuItems(snap, null))
+        return this.listOnce('MENU        TAP  choose        2x TAP  back', menuItems(snap, null))
       case 'waiting':
-        return this.listOnce('WAITING  (tap = actions, 2x = back)', waitingItems(snap ?? emptySnap))
+        return this.listOnce('WAITING     TAP  actions       2x TAP  back', waitingItems(snap ?? emptySnap))
       case 'order':
         return this.listOnce(`${s.order.label}  ${s.order.amount} GRAM  ${s.order.code}`, orderActionItems(s.order))
       case 'listening':
-        return this.display.text(listeningCard(MAX_LISTEN_SEC - Math.floor((Date.now() - s.startedAt) / 1000)))
+        return this.display.card(listeningCard(MAX_LISTEN_SEC - Math.floor((Date.now() - s.startedAt) / 1000), snap, s.vad.level, s.vad.heardSpeech))
       case 'thinking':
-        return this.display.text(thinkingCard(s.transcript))
+        return this.display.card(thinkingCard(s.transcript, snap))
       case 'confirm':
-        return this.display.text(confirmCard(s.confirm))
+        return this.display.card(confirmCard(s.confirm, snap, this.confirmLeft(s)))
       case 'message':
-        return this.display.text(messageCard(s.text, s.examples))
+        return this.display.card(messageCard(s.text, s.examples, snap))
       case 'payment':
-        return this.display.text(paymentCard(s.event))
+        return this.display.card(paymentCard(s.event, snap))
     }
+  }
+
+  private confirmLeft(s: { confirm: Confirm; startedAt: number }) {
+    return s.confirm.expiresInSec - 1 - Math.floor((Date.now() - s.startedAt) / 1000)
   }
 
   /** Rebuilding a list resets its scroll position, so only rebuild when the items changed. */

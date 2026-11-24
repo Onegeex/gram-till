@@ -3,7 +3,7 @@ import { Backend } from './backend'
 import { mountCompanion, type Companion } from './companion'
 import { TillController } from './controller'
 import { GlassesDisplay, toGestures } from './display'
-import { unpairedCard } from './format'
+import { confirmCard, listeningCard, messageCard, offlineCard, paymentCard, thinkingCard, tillCard, unpairedCard, type Card, type TillSnapshot } from './format'
 
 // Hosted (https, e.g. on Vercel) the API is on the same origin; in local dev it's the server on :8787.
 const DEFAULT_SERVER =
@@ -31,9 +31,48 @@ async function save(bridge: EvenAppBridge, key: string, value: string) {
   }
 }
 
+/** ?gallery: step through every lens card with sample data (design review and screenshots). Tap = next. */
+function galleryCards(): Card[] {
+  const s: TillSnapshot = {
+    seller: { name: 'Corner Coffee', address: 'x', network: 'testnet' },
+    today: { total: '214', paid: 18, unmatched: 0, waiting: 2 },
+    waiting: [],
+    recent: [{ amount: '12', result: 'paid', label: 'Table 4', comment: 'GT-7F3K', agoMin: 2 }],
+  }
+  const c = { id: 'x', kind: 'charge' as const, label: 'Maria', amount: '5', item: null, reachable: true, expiresInSec: 20 }
+  return [
+    tillCard(s),
+    listeningCard(6, s, 0.15),
+    listeningCard(5, s, 0.8, true),
+    thinkingCard('Charge Maria five.', s),
+    confirmCard(c, s, 17),
+    confirmCard({ ...c, label: 'Table 4', amount: '8', item: '2x latte', reachable: false }, s, 12),
+    paymentCard({ result: 'paid', amount: '5', label: 'Maria', code: 'GT-7F3K', item: null, late: false, comment: 'GT-7F3K' }, s),
+    paymentCard({ result: 'underpaid', amount: '3', label: 'Kenji', code: 'GT-9QX2', item: null, late: false, comment: 'GT-9QX2' }, s),
+    paymentCard({ result: 'unmatched', amount: '20', label: null, code: null, item: null, late: false, comment: 'thanks!' }, s),
+    messageCard('Sent to Maria on Telegram', undefined, s),
+    messageCard('Say the amount in GRAM', ['"Charge Maria twelve"'], s),
+    offlineCard(s),
+    unpairedCard(),
+  ]
+}
+
 async function main() {
   let companion: Companion | null = null
   const bridge = await waitForEvenAppBridge()
+  if (new URLSearchParams(location.search).has('gallery')) {
+    const cards = galleryCards()
+    let i = 0
+    const display = await GlassesDisplay.create(bridge, cards[0])
+    bridge.onEvenHubEvent(e => {
+      for (const g of toGestures(e)) {
+        if (g.kind === 'tap' || g.kind === 'down') void display.card(cards[(i = (i + 1) % cards.length)])
+        if (g.kind === 'up') void display.card(cards[(i = (i + cards.length - 1) % cards.length)])
+      }
+    })
+    console.log('GRAM_TILL_GALLERY', cards.length)
+    return
+  }
   const display = await GlassesDisplay.create(bridge, unpairedCard())
 
   const backend = new Backend((await load(bridge, K_SERVER)) || DEFAULT_SERVER, (await load(bridge, K_TOKEN)) || null)

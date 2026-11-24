@@ -42,74 +42,201 @@ export interface PaymentEvent {
 }
 
 /** Fit a line to n chars, cutting at a word boundary (no ellipsis glyph: it may not be in the font). */
-const clip = (s: string, n: number) => {
+export const clip = (s: string, n: number) => {
   if (s.length <= n) return s
   const cut = s.slice(0, n)
   const sp = cut.lastIndexOf(' ')
   return (sp > n / 2 ? cut.slice(0, sp) : cut).replace(/[\s,.;:(-]+$/, '')
 }
-const ago = (m: number) => (m < 1 ? 'now' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h`)
+const ago = (m: number) => (m < 1 ? 'now' : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`)
 
-export function tillCard(s: TillSnapshot): string {
-  const last = s.recent.find(r => r.result === 'paid')
-  const lines = [
-    clip(`GRAM TILL${s.seller.network === 'testnet' ? ' (test)' : ''}  ${s.seller.name}`, 34),
-    `TODAY  ${s.today.total} GRAM`,
-    `${s.today.paid} paid  |  ${s.today.waiting} waiting`,
-    last ? clip(`Last: ${last.label ?? 'Walk-in'} +${last.amount}  ${ago(last.agoMin)}`, 34) : 'No payments yet today',
-    'tap: speak  |  swipe: menu',
-  ]
-  return lines.join('\n')
+// ---------- lens cards ----------
+//
+// One layout for every screen, built for a glance:
+//
+//   +-------------------------------------------------------------+
+//   | SHOP NAME (dim)                      STATE (dim)            |  status bar
+//   | +-----------------------+   Title (brightest)               |
+//   | | KICKER                |   detail line (medium)            |  hero image (big type,
+//   | |   +15  GRAM           |   detail line (medium)            |  drawn as a picture) +
+//   | +-----------------------+                                   |  text column
+//   | TAP  send        2x TAP  cancel (dim)                       |  hint row
+//   +-------------------------------------------------------------+
+//
+// Text stays plain ASCII (the lens font drops other glyphs); icons and big numbers
+// live in the hero image, where anything can be drawn.
+
+export type HeroIcon = 'check' | 'warn' | 'mic' | 'dots' | 'link' | 'coin' | 'cross'
+
+export interface Hero {
+  icon?: HeroIcon
+  kicker?: string // small caps line above the number
+  big?: string // the number / word, drawn large
+  unit?: string // e.g. GRAM
+  level?: number // 0..1, live mic level bar (listening)
 }
 
-export function paymentCard(p: PaymentEvent): string {
+export interface Card {
+  status: [string, string] // left (shop), right (state)
+  hero?: Hero
+  title?: string // brightest line of the text column
+  lines?: string[] // detail lines
+  hint?: string // bottom row, dim
+  boxed?: boolean // outline the text column (decisions and takeovers)
+}
+
+const SHOP = 26 // chars that fit the status bar's left box
+const COL = 24 // chars per line in the text column next to the hero
+
+const shop = (s: TillSnapshot | null | undefined) => clip((s?.seller.name ?? 'Gram Till').toUpperCase(), SHOP)
+const net = (s: TillSnapshot | null | undefined) => (s?.seller.network === 'mainnet' ? '' : 'TESTNET  ')
+
+/** Plain-text rendering of a card (companion log, tests, and a fallback if images fail). */
+export function cardText(c: Card): string {
+  const h = c.hero
+  const heroLine = h ? [h.kicker, [h.big, h.unit].filter(Boolean).join(' ')].filter(Boolean).join('  ') : ''
+  return [c.status.filter(Boolean).join('  |  '), heroLine, c.title ?? '', ...(c.lines ?? []), c.hint ?? ''].filter(Boolean).join('\n')
+}
+
+export function tillCard(s: TillSnapshot): Card {
+  const last = s.recent.find(r => r.result === 'paid')
+  return {
+    status: [shop(s), `${net(s)}LIVE`],
+    hero: { icon: 'coin', kicker: 'TODAY', big: s.today.total, unit: 'GRAM' },
+    title: `${s.today.paid} paid`,
+    lines: [
+      s.today.waiting ? `${s.today.waiting} waiting` : 'Nothing waiting',
+      last ? clip(`Last: ${last.label ?? 'Walk-in'} +${last.amount}`, COL) : 'No payments yet',
+      last ? ago(last.agoMin) : '',
+    ].filter(Boolean),
+    hint: 'TAP  charge          SWIPE  menu',
+  }
+}
+
+export function paymentCard(p: PaymentEvent, s?: TillSnapshot | null): Card {
+  const who = clip(p.label ?? 'Walk-in', COL)
+  const status: [string, string] = [shop(s), 'PAYMENT']
   switch (p.result) {
     case 'paid':
-      return [`PAID`, `+${p.amount} GRAM`, clip(`${p.label ?? 'Walk-in'}  ${p.code ?? ''}`, 34), p.item ? clip(p.item, 34) : '', p.late ? '(paid after expiry)' : '']
-        .filter(Boolean)
-        .join('\n')
+      return {
+        status,
+        hero: { icon: 'check', kicker: 'PAID', big: `+${p.amount}`, unit: 'GRAM' },
+        title: who,
+        lines: [p.item ? clip(p.item, COL) : '', p.code ?? '', p.late ? 'paid after expiry' : ''].filter(Boolean),
+        hint: 'Receipt sent in Telegram',
+        boxed: true,
+      }
     case 'underpaid':
-      return ['SHORT PAYMENT', `+${p.amount} GRAM only`, clip(`${p.label ?? ''}  ${p.code ?? ''}`, 34), 'Order still waiting']
-        .join('\n')
+      return {
+        status,
+        hero: { icon: 'warn', kicker: 'SHORT', big: `+${p.amount}`, unit: 'GRAM' },
+        title: who,
+        lines: ['Paid too little', 'Order still waiting', p.code ?? ''].filter(Boolean),
+        hint: 'They can top up from the same link',
+        boxed: true,
+      }
     case 'already_paid':
-      return ['EXTRA PAYMENT', `+${p.amount} GRAM`, clip(`${p.label ?? ''} already paid`, 34), 'Details in Telegram'].join('\n')
+      return { status, hero: { icon: 'warn', kicker: 'EXTRA', big: `+${p.amount}`, unit: 'GRAM' }, title: who, lines: ['Already paid before', 'Details in Telegram'], hint: 'Refund from your wallet if needed', boxed: true }
     case 'cancelled_order':
-      return ['PAID A CANCELLED ORDER', `+${p.amount} GRAM`, clip(`${p.label ?? ''}  ${p.code ?? ''}`, 34), 'Details in Telegram'].join('\n')
+      return { status, hero: { icon: 'warn', kicker: 'CANCELLED', big: `+${p.amount}`, unit: 'GRAM' }, title: who, lines: ['Paid a cancelled order', 'Details in Telegram'], hint: 'Refund from your wallet if needed', boxed: true }
     default:
-      return ['MONEY IN', `+${p.amount} GRAM`, 'No order code', p.comment ? clip(`"${p.comment}"`, 34) : 'Details in Telegram'].join('\n')
+      return {
+        status,
+        hero: { icon: 'coin', kicker: 'MONEY IN', big: `+${p.amount}`, unit: 'GRAM' },
+        title: 'No order code',
+        lines: p.comment ? [clip(`"${p.comment}"`, COL)] : ['Details in Telegram'],
+        hint: 'Not counted as an order',
+        boxed: true,
+      }
   }
 }
 
-export function confirmCard(c: Confirm): string {
+export function confirmCard(c: Confirm, s?: TillSnapshot | null, secondsLeft?: number): Card {
+  const left = secondsLeft !== undefined ? `   ${Math.max(0, secondsLeft)}s` : ''
   if (c.kind === 'cancel') {
-    return ['CANCEL ORDER?', clip(`${c.label}  ${c.amount} GRAM`, 34), c.item ? clip(c.item, 34) : '', '', 'tap = cancel it  |  2x tap = keep'].join('\n')
+    return {
+      status: [shop(s), 'CONFIRM'],
+      hero: { icon: 'cross', kicker: 'CANCEL ORDER', big: c.amount, unit: 'GRAM' },
+      title: clip(c.label, COL),
+      lines: [c.item ? clip(c.item, COL) : ''].filter(Boolean),
+      hint: `TAP  cancel it        2x TAP  keep${left}`,
+      boxed: true,
+    }
   }
-  return [
-    clip(`CHARGE ${c.label}`, 34),
-    `${c.amount} GRAM`,
-    c.item ? clip(c.item, 34) : '',
-    c.reachable ? '-> sends in their Telegram' : '-> show your counter QR',
-    'tap = SEND  |  2x tap = cancel',
-  ].join('\n')
+  return {
+    status: [shop(s), 'CONFIRM'],
+    hero: { kicker: 'CHARGE', big: c.amount, unit: 'GRAM' },
+    title: clip(c.label, COL),
+    lines: [c.item ? clip(c.item, COL) : '', c.reachable ? 'Goes to their Telegram' : 'Show your counter QR'].filter(Boolean),
+    hint: `TAP  send        2x TAP  cancel${left}`,
+    boxed: true,
+  }
 }
 
-export function listeningCard(seconds: number): string {
-  return ['LISTENING...', 'e.g. "Charge Maria twelve"', '"Charge table 4, two lattes"', '', `just pause when done  |  ${seconds}s`].join('\n')
+/** A 0..1 level as a text meter: [#######.....] */
+export const meter = (level: number, n = 14) => {
+  const k = Math.round(Math.max(0, Math.min(1, level)) * n)
+  return '[' + '#'.repeat(k) + '.'.repeat(n - k) + ']'
 }
 
-export const thinkingCard = (transcript?: string) =>
-  ['...', transcript ? clip(`"${transcript}"`, 34) : 'Working on it'].join('\n')
-
-export function messageCard(text: string, examples?: string[]): string {
-  const ex = (examples ?? []).slice(0, 2).map(e => clip(e, 34))
-  return [clip(text, 34), ...(ex.length ? ['Try:', ...ex] : [])].join('\n')
+export function listeningCard(seconds: number, s?: TillSnapshot | null, level = 0, heard = false): Card {
+  return {
+    status: [shop(s), 'LISTENING'],
+    hero: { icon: 'mic', kicker: heard ? 'GOT IT' : 'SPEAK NOW', level },
+    title: 'One charge, e.g.',
+    lines: ['"Charge Maria five"', '"Table 4, two lattes"'],
+    hint: `${meter(level)}   pause to send   ${seconds}s`,
+  }
 }
 
-export const unpairedCard = () =>
-  ['GRAM TILL', 'Not connected yet.', 'In Telegram, send /pair to', 'the bot, then enter the code', 'in Gram Till on your phone.'].join('\n')
+export const thinkingCard = (transcript?: string, s?: TillSnapshot | null): Card => ({
+  status: [shop(s), 'WORKING'],
+  hero: { icon: 'dots', kicker: 'ONE SEC' },
+  title: 'Heard',
+  lines: transcript ? wrap(`"${transcript}"`, COL, 3) : ['...'],
+})
 
-export const offlineCard = (name?: string) =>
-  ['GRAM TILL' + (name ? `  ${name}` : ''), 'Reconnecting...', 'Payments are still recorded', 'and sent to your Telegram.'].join('\n')
+/** Results and problems. Success gets a check; anything that needs another try gets a warning. */
+export function messageCard(text: string, examples?: string[], s?: TillSnapshot | null): Card {
+  const ex = (examples ?? []).slice(0, 2).map(e => clip(e, COL))
+  const deliberate = /^(not sent|cancelled)/i.test(text) // the seller chose this: neutral, not an error
+  const problem = !deliberate && (!!examples?.length || /\b(not|no|didn'?t|can'?t|couldn'?t|fail|failed|expired|timed out|unknown|error|say the|try)\b/i.test(text))
+  return {
+    status: [shop(s), problem ? 'TRY AGAIN' : 'DONE'],
+    hero: problem ? { icon: 'warn', kicker: 'HMM' } : deliberate ? { icon: 'cross', kicker: 'OK' } : { icon: 'check', kicker: /^sent/i.test(text) ? 'SENT' : 'DONE' },
+    title: wrap(text, COL, 3).join('\n'),
+    lines: ex.length ? ['Try:', ...ex] : [],
+  }
+}
+
+export const unpairedCard = (): Card => ({
+  status: ['GRAM TILL', 'NOT CONNECTED'],
+  hero: { icon: 'link', kicker: 'PAIR', big: '/pair' },
+  title: 'Connect your till',
+  lines: ['In Telegram: /pair', 'Enter the code in', 'Gram Till on your phone'],
+})
+
+export const offlineCard = (s?: TillSnapshot | null): Card => ({
+  status: [shop(s), 'OFFLINE'],
+  hero: { icon: 'dots', kicker: 'RECONNECTING' },
+  title: 'Back in a moment',
+  lines: ['Payments are still', 'recorded and sent', 'to your Telegram'],
+})
+
+/** Wrap text into up to `max` lines of `n` chars. */
+export function wrap(text: string, n: number, max: number): string[] {
+  const out: string[] = []
+  let line = ''
+  for (const w of text.split(/\s+/)) {
+    if ((line + ' ' + w).trim().length > n) {
+      if (line) out.push(line)
+      line = w.slice(0, n)
+    } else line = (line + ' ' + w).trim()
+    if (out.length === max) break
+  }
+  if (line && out.length < max) out.push(line)
+  return out
+}
 
 // ---------- list screens (itemName max 64 chars, max 20 items) ----------
 

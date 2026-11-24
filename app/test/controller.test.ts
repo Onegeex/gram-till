@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OsEventTypeList } from '@evenrealities/even_hub_sdk'
 import { TillController, Vad, type TillApi } from '../src/controller'
 import { toGestures, type Display } from '../src/display'
-import { tillCard, type PaymentEvent, type TillSnapshot } from '../src/format'
+import { cardText, tillCard, type Card, type PaymentEvent, type TillSnapshot } from '../src/format'
 
 class FakeDisplay implements Display {
   frames: string[] = []
@@ -12,8 +12,10 @@ class FakeDisplay implements Display {
   get last() {
     return this.frames[this.frames.length - 1]
   }
-  async text(c: string) {
-    this.frames.push(c)
+  cards: Card[] = []
+  async card(c: Card) {
+    this.cards.push(c)
+    this.frames.push(cardText(c))
   }
   async list(header: string, items: string[]) {
     this.frames.push(`[LIST] ${header}\n${items.join('\n')}`)
@@ -84,7 +86,7 @@ afterEach(() => vi.useRealTimers())
 describe('TillController', () => {
   it('shows the till card when paired', () => {
     const { d } = setup()
-    expect(d.last).toBe(tillCard(snap))
+    expect(d.last).toBe(cardText(tillCard(snap)))
     expect(d.last).toContain('TODAY  214 GRAM')
   })
 
@@ -98,13 +100,13 @@ describe('TillController', () => {
     await c.gesture({ kind: 'tap' })
     expect(d.micState).toBe(false)
     expect(api.calls).toContain('voice:40000')
-    expect(d.last).toContain('CHARGE Tunde')
-    expect(d.last).toContain('tap = SEND')
+    expect(d.last).toContain('CHARGE  15 GRAM\nTunde')
+    expect(d.last).toContain('TAP  send')
     await c.gesture({ kind: 'tap' })
     expect(api.calls).toContain('confirm:c1')
     expect(d.last).toContain('Sent to Tunde')
     vi.advanceTimersByTime(3000)
-    expect(d.last).toBe(tillCard(snap))
+    expect(d.last).toBe(cardText(tillCard(snap)))
   })
 
   it('keeps audio that arrives before the mic confirms (no clipped first word)', async () => {
@@ -152,7 +154,7 @@ describe('TillController', () => {
     await quiet(c, 1000) // pause -> send
     expect(api.calls.some(x => x.startsWith('voice'))).toBe(true)
     expect(d.micState).toBe(false)
-    expect(d.last).toContain('CHARGE Tunde') // fake API answers with Tunde's confirm card
+    expect(d.last).toContain('CHARGE  15 GRAM\nTunde') // fake API answers with Tunde's confirm card
   })
 
   it('a short pause mid-sentence does not cut the command', async () => {
@@ -193,7 +195,7 @@ describe('TillController', () => {
     expect(d.last).toContain('PAID')
     expect(d.last).toContain('+15 GRAM')
     vi.advanceTimersByTime(4100)
-    expect(d.last).toBe(tillCard(snap))
+    expect(d.last).toBe(cardText(tillCard(snap)))
   })
 
   it('payment never interrupts a confirm card; it shows right after', async () => {
@@ -202,7 +204,7 @@ describe('TillController', () => {
     await c.gesture(pcm(40000))
     await c.gesture({ kind: 'tap' }) // confirm card up
     c.onPayment(paid)
-    expect(d.last).toContain('CHARGE Tunde')
+    expect(d.last).toContain('CHARGE  15 GRAM\nTunde')
     await c.gesture({ kind: 'double' }) // discard -> message
     vi.advanceTimersByTime(2600) // message -> till -> queued payment
     expect(d.last).toContain('PAID')
@@ -214,7 +216,7 @@ describe('TillController', () => {
     expect(d.last).toContain('[LIST]')
     expect(d.last).toContain('Waiting orders (1)')
     await c.gesture({ kind: 'select', index: 2 })
-    expect(d.last).toContain('Tunde  15 GRAM  3m')
+    expect(d.last).toContain('Tunde  15 GRAM  3m ago')
     await c.gesture({ kind: 'select', index: 0 })
     expect(d.last).toContain('Remind Tunde')
     await c.gesture({ kind: 'select', index: 0 })
@@ -230,7 +232,7 @@ describe('TillController', () => {
     vi.advanceTimersByTime(3000)
     await c.gesture({ kind: 'down' })
     await c.gesture({ kind: 'double' })
-    expect(d.last).toBe(tillCard(snap))
+    expect(d.last).toBe(cardText(tillCard(snap)))
   })
 
   it('double-tap on the till opens the exit dialog', async () => {
@@ -243,7 +245,7 @@ describe('TillController', () => {
     const api = makeApi({ command: vi.fn(async () => ({ transcript: 'charge tunde 15', action: 'confirm' as const, confirm: confirmCharge })) })
     const { d, c } = setup(api)
     await c.typed('charge Tunde 15')
-    expect(d.last).toContain('CHARGE Tunde')
+    expect(d.last).toContain('CHARGE  15 GRAM\nTunde')
   })
 
   it('shows an honest card for unmatched money', () => {

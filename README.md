@@ -27,11 +27,13 @@ The rules ask entrants to say what existed before build week. Honest timeline:
 
 ## Screens (from the official Even Hub simulator)
 
-| Till | Payment lands | Voice → confirm |
+Built for a glance mid-task: a dim status bar, a big **hero** number drawn as an image (bold type and icons the lens font can't show), a bright text column, and a dim hint row. Only the parts that change are redrawn, so countdowns and the live mic meter don't flicker. See every screen with sample data at `/glasses/?gallery` (tap = next).
+
+| Till | Listening (live mic meter) | Voice → confirm (countdown) |
 |---|---|---|
-| ![Till](docs/screens/till.png) | ![Paid](docs/screens/paid.png) | ![Confirm](docs/screens/confirm.png) |
-| **Menu** | **Waiting orders** | **Short payment, reported honestly** |
-| ![Menu](docs/screens/menu.png) | ![Waiting](docs/screens/waiting.png) | ![Short](docs/screens/short-payment.png) |
+| ![Till](docs/screens/till.png) | ![Listening](docs/screens/listening.png) | ![Confirm](docs/screens/confirm.png) |
+| **Payment lands** | **Short payment, reported honestly** | **Money without an order code** |
+| ![Paid](docs/screens/paid.png) | ![Short](docs/screens/short-payment.png) | ![Money in](docs/screens/money-in.png) |
 
 Customer pay page (opens from the Telegram Pay button): [docs/screens/pay-page.png](docs/screens/pay-page.png)
 
