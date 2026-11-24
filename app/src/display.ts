@@ -64,7 +64,13 @@ export class GlassesDisplay implements Display {
   static async create(bridge: EvenAppBridge, initial: string): Promise<GlassesDisplay> {
     const d = new GlassesDisplay(bridge)
     const r = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer({ containerTotalNum: 1, textObject: [textMain(initial)] }))
-    if (r !== 0) console.error('createStartUpPageContainer failed:', r)
+    if (r !== 0) {
+      // The startup page can only be created once per session (e.g. the WebView reloaded), or the
+      // host refused it. Draw our page with a rebuild instead of leaving the lens blank.
+      console.warn('createStartUpPageContainer returned', r, '- rebuilding the page instead')
+      const ok = await bridge.rebuildPageContainer(new RebuildPageContainer({ containerTotalNum: 1, textObject: [textMain(initial)] })).catch(() => false)
+      if (!ok) console.error('rebuildPageContainer also failed; the lens may stay blank until the next screen change')
+    }
     d.lastText = initial
     return d
   }
@@ -79,7 +85,9 @@ export class GlassesDisplay implements Display {
     return this.run(async () => {
       if (this.layout === 'text') {
         if (content === this.lastText) return
-        await this.bridge.textContainerUpgrade(new TextContainerUpgrade({ containerID: MAIN.id, containerName: MAIN.name, content }))
+        const ok = await this.bridge.textContainerUpgrade(new TextContainerUpgrade({ containerID: MAIN.id, containerName: MAIN.name, content })).catch(() => false)
+        // "container 1 not found": the page isn't there (lost or never created). Rebuild it.
+        if (ok === false) await this.bridge.rebuildPageContainer(new RebuildPageContainer({ containerTotalNum: 1, textObject: [textMain(content)] }))
       } else {
         await this.bridge.rebuildPageContainer(new RebuildPageContainer({ containerTotalNum: 1, textObject: [textMain(content)] }))
         this.layout = 'text'
