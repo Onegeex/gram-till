@@ -149,6 +149,40 @@ describe('Watcher', () => {
   })
 })
 
+describe('Watcher first sight', () => {
+  it('catches up a payment for a waiting order made before the first successful poll, ignoring other history', async () => {
+    const { store, events, seller } = await setup()
+    const order = await store.createOrder({ sellerId: seller.id, label: 'Abiola', amountNano: toNano('1') })
+    const now = Math.floor(Date.now() / 1000)
+    const chain: TxLike[] = [
+      fakeTx({ amount: toNano('1'), comment: order.code, now }), // paid while the API was down
+      fakeTx({ amount: toNano('2'), comment: 'faucet', now: now - 5 }), // unrelated: not replayed
+      fakeTx({ amount: toNano('9'), comment: order.code, now: now - 86_400 }), // older than the order
+    ]
+    const w = new Watcher(store, async (_a, { limit }) => chain.slice(0, limit), 'testnet')
+    await w.tick()
+    expect((await events()).filter(e => e.type === 'payment').map(e => (e as any).result)).toEqual(['paid'])
+    expect((await store.getOrder(order.id))!.status).toBe('paid')
+    await w.tick() // cursor now set: nothing replays
+    expect((await events()).filter(e => e.type === 'payment')).toHaveLength(1)
+    await store.close()
+  })
+
+  it('falls back to archive nodes only when the regular query fails', async () => {
+    const calls: any[] = []
+    const { toncenterFetcher } = await import('../src/watcher.js')
+    const f = toncenterFetcher({
+      getTransactions: async (_a, o) => {
+        calls.push(o.archival ?? false)
+        if (!o.archival) throw new Error('boom')
+        return []
+      },
+    })
+    await f('EQD2NmD_lH5f5u1Kj3KfGyTvhZSX0Eg6qp2a5IQUKXxOG21n', { limit: 1 })
+    expect(calls).toEqual([false, true])
+  })
+})
+
 describe('Watcher database usage', () => {
   it('idle polling does not hit the database every tick', async () => {
     const { store, seller } = await setup()
