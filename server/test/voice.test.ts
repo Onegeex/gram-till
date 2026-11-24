@@ -179,6 +179,9 @@ describe('speech-to-text homophones', () => {
     expect(parseCommand('Charge table for two lattes.', ctx)).toMatchObject({ kind: 'charge', label: 'Table 4', item: 'latte', qty: 2 })
     expect(parseCommand('Charge table for, twelve.', ctx)).toMatchObject({ kind: 'charge', label: 'Table 4', amount: 12 })
   })
+  it('keeps an unpriced item after a table instead of charging the bare number', () => {
+    expect(parseCommand('Charge table for two lattes.', { menu: [], customers: [] })).toMatchObject({ kind: 'charge', label: 'Table 4', item: 'lattes', qty: 2, amount: null })
+  })
   it('reads a final "too" as two, but keeps "for" in "for two lattes"', () => {
     expect(parseCommand('Charge Abiola too.', ctx)).toMatchObject({ kind: 'charge', label: 'Abiola', amount: 2 })
     expect(parseCommand('Charge Maria for two lattes', ctx)).toMatchObject({ kind: 'charge', label: 'Maria', item: 'latte', qty: 2 })

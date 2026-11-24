@@ -330,6 +330,18 @@ export function parseCommand(text: string, ctx: VoiceContext): Command {
     }
   }
 
+  if (label && !item && nameWords.length) {
+    // "table four, two lattes" with no latte on the menu: the leftover words are an item we
+    // can't price. Never drop them and charge the bare number; let the preview say "unknown item".
+    const itemStart = words.indexOf(nameWords[0])
+    if (amount !== null && Number.isInteger(amount) && amount <= 20 && words.lastIndexOf(String(lastNum)) === itemStart - 1) {
+      qty = amount
+      amount = null
+    }
+    item = nameWords.join(' ')
+    nameWords = []
+  }
+
   if (!label && nameWords.length) label = resolveLabel(nameWords, ctx)
   if (amount === null && !item) return { kind: 'unknown', text }
   if (amount !== null && (!(amount > 0) || amount > 1_000_000)) return { kind: 'unknown', text }
