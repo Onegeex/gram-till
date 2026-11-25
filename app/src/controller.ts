@@ -144,6 +144,16 @@ export class TillController {
     else this.queuedPayments.push(p)
   }
 
+  /** What the lens is showing (the phone mirrors it and offers the same buttons). */
+  get screenKind(): Screen['kind'] {
+    return this.screen.kind
+  }
+
+  /** Phone buttons for the confirm card: same effect as a tap / double-tap on the glasses. */
+  async press(kind: 'tap' | 'double') {
+    if (this.screen.kind === 'confirm' || this.screen.kind === 'payment' || this.screen.kind === 'message') await this.gesture({ kind })
+  }
+
   /** Text command typed on the phone (testing / noisy places): same confirm flow as voice. */
   async typed(text: string) {
     if (this.screen.kind === 'listening') await this.stopListening('cancel')

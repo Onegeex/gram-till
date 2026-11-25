@@ -2,7 +2,7 @@ import { waitForEvenAppBridge, type EvenAppBridge } from '@evenrealities/even_hu
 import { Backend } from './backend'
 import { mountCompanion, type Companion } from './companion'
 import { TillController } from './controller'
-import { GlassesDisplay, toGestures } from './display'
+import { GlassesDisplay, toGestures, type Display } from './display'
 import { confirmCard, listeningCard, messageCard, offlineCard, paymentCard, thinkingCard, tillCard, unpairedCard, type Card, type TillSnapshot } from './format'
 
 // Hosted (https, e.g. on Vercel) the API is on the same origin; in local dev it's the server on :8787.
@@ -73,10 +73,19 @@ async function main() {
     console.log('GRAM_TILL_GALLERY', cards.length)
     return
   }
-  const display = await GlassesDisplay.create(bridge, unpairedCard())
+  const glasses = await GlassesDisplay.create(bridge, unpairedCard())
+  // Everything drawn on the lens is mirrored on the phone (with buttons when it's a decision).
+  let controller: TillController
+  const mirror = (c: Parameters<Companion['mirror']>[0]) => companion?.mirror(c, controller?.screenKind ?? 'unpaired')
+  const display: Display = {
+    card: c => (mirror(c), glasses.card(c)),
+    list: (head, items) => (mirror({ list: head, items }), glasses.list(head, items)),
+    mic: on => glasses.mic(on),
+    exitDialog: () => glasses.exitDialog(),
+  }
 
   const backend = new Backend((await load(bridge, K_SERVER)) || DEFAULT_SERVER, (await load(bridge, K_TOKEN)) || null)
-  const controller = new TillController(display, backend)
+  controller = new TillController(display, backend)
   controller.onTranscript = t => companion?.transcript(t)
 
   let closeStream: (() => void) | null = null
@@ -142,7 +151,11 @@ async function main() {
       await connect()
     },
     typed: text => controller.typed(text),
+    press: kind => controller.press(kind),
+    remind: id => backend.remind(id),
+    cancel: id => backend.cancel(id),
   })
+  companion.mirror(unpairedCard(), 'unpaired')
 
   const unsubscribe = bridge.onEvenHubEvent(event => {
     for (const g of toGestures(event)) {
@@ -153,6 +166,12 @@ async function main() {
       void controller.gesture(g)
     }
   })
+
+  // Dev only: ?type=charge%20maria%205 runs a typed command once connected (UI review, tests).
+  if (import.meta.env.DEV && new URLSearchParams(location.search).get('type')) {
+    const cmd = new URLSearchParams(location.search).get('type')!
+    setTimeout(() => void controller.typed(cmd), 2500)
+  }
 
   // Optional deep link for quick setup: index.html?server=https://…&pair=123456
   const params = new URLSearchParams(location.search)

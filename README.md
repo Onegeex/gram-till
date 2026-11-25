@@ -35,7 +35,12 @@ Built for a glance mid-task: a dim status bar, a big **hero** number drawn as an
 | **Payment lands** | **Short payment, reported honestly** | **Money without an order code** |
 | ![Paid](docs/screens/paid.png) | ![Short](docs/screens/short-payment.png) | ![Money in](docs/screens/money-in.png) |
 
-Customer pay page (opens from the Telegram Pay button): [docs/screens/pay-page.png](docs/screens/pay-page.png)
+**Phone app** (inside the Even app): a live mirror of the lens with Send / Cancel when a charge waits for you, today's numbers, a typed charge box, waiting orders with Remind / Cancel, and the payment feed.
+
+| Phone app | Confirm from the phone | Customer pay page |
+|---|---|---|
+| ![Phone](docs/screens/phone.png) | ![Phone confirm](docs/screens/phone-confirm.png) | ![Pay page](docs/screens/pay-page.png) |
+
 
 ## How it works
 

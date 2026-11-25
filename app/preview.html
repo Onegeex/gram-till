@@ -1,0 +1,33 @@
+<!doctype html>
+<!-- Dev-only design preview of the phone app with sample data: /preview.html (not part of the build). -->
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Gram Till preview</title></head>
+<body><div id="app"></div>
+<script type="module">
+  const html = await (await fetch('/index.html')).text()
+  const style = new DOMParser().parseFromString(html, 'text/html').querySelector('style')
+  document.head.appendChild(style)
+  const { mountCompanion } = await import('/src/companion.ts')
+  const { tillCard, confirmCard } = await import('/src/format.ts')
+  const q = new URLSearchParams(location.search)
+  const c = mountCompanion({ server: 'https://gram-till.vercel.app', pair: async () => {}, unpair: async () => {}, typed: async () => {}, press: async () => {}, remind: async () => ({ ok: true, message: 'ok' }), cancel: async () => {} })
+  const snap = {
+    seller: { name: 'Corner Coffee', address: '0QCOmFghR0fSUPi9us4Lc4g-XdS8Z1TipSloAqopL-QVxAGc', network: 'testnet' },
+    today: { total: '214', paid: 18, unmatched: 1, waiting: 2 },
+    waiting: [
+      { id: 1, code: 'GT-H3ZC', label: 'Table 4', item: '2x latte', amount: '8', status: 'waiting', agoMin: 3, expired: false },
+      { id: 2, code: 'GT-4G9D', label: 'Aisha', item: null, amount: '3', status: 'waiting', agoMin: 41, expired: true },
+    ],
+    recent: [
+      { amount: '5', result: 'paid', label: 'Maria', comment: 'GT-RQ2R', agoMin: 2 },
+      { amount: '5', result: 'underpaid', label: 'Kenji', comment: 'GT-TZGK', agoMin: 6 },
+      { amount: '20', result: 'unmatched', label: null, comment: 'thanks!', agoMin: 30 },
+    ],
+  }
+  if (q.has('setup')) c.state({ paired: false, server: 'https://gram-till.vercel.app' })
+  else {
+    c.state({ paired: true, server: '', shop: 'Corner Coffee', network: 'testnet', snapshot: snap })
+    if (q.has('confirm')) c.mirror(confirmCard({ id: 'x', kind: 'charge', label: 'Table 4', amount: '8', item: '2x latte', reachable: false, expiresInSec: 20 }, snap, 14), 'confirm')
+    else c.mirror(tillCard(snap), 'till')
+    c.transcript('charge table four, two lattes')
+  }
+</script></body></html>
