@@ -7,7 +7,7 @@
   const style = new DOMParser().parseFromString(html, 'text/html').querySelector('style')
   document.head.appendChild(style)
   const { mountCompanion } = await import('/src/companion.ts')
-  const { tillCard, confirmCard } = await import('/src/format.ts')
+  const { tillCard, confirmCard, listeningCard } = await import('/src/format.ts')
   const q = new URLSearchParams(location.search)
   const c = mountCompanion({ server: 'https://gram-till.vercel.app', pair: async () => {}, unpair: async () => {}, typed: async () => {}, press: async () => {}, remind: async () => ({ ok: true, message: 'ok' }), cancel: async () => {} })
   const snap = {
@@ -23,11 +23,18 @@
       { amount: '20', result: 'unmatched', label: null, comment: 'thanks!', agoMin: 30 },
     ],
   }
+  if (q.has('video')) {
+    // Same day as the recorded demo session (for the video's listening shot).
+    snap.today = { total: '18.5', paid: 3, unmatched: 0, waiting: 1 }
+    snap.waiting = [{ id: 4, code: 'GT-85HU', label: 'Lucas', item: 'croissant', amount: '3.5', status: 'waiting', agoMin: 1, expired: false }]
+    snap.recent = [{ amount: '6', result: 'paid', label: 'Aisha', comment: 'GT-24QZ', agoMin: 1 }, { amount: '4.5', result: 'paid', label: 'Table 2', comment: 'GT-C588', agoMin: 1 }, { amount: '8', result: 'paid', label: 'Kenji', comment: 'GT-A8S2', agoMin: 1 }]
+  }
   if (q.has('setup')) c.state({ paired: false, server: 'https://gram-till.vercel.app' })
   else {
     c.state({ paired: true, server: '', shop: 'Corner Coffee', network: 'testnet', snapshot: snap })
-    if (q.has('confirm')) c.mirror(confirmCard({ id: 'x', kind: 'charge', label: 'Table 4', amount: '8', item: '2x latte', reachable: false, expiresInSec: 20 }, snap, 14), 'confirm')
+    if (q.has('listen')) c.mirror(listeningCard(Number(q.get('sec') ?? 6), snap, Number(q.get('level') ?? 0.2), q.has('heard')), 'listening')
+    else if (q.has('confirm')) c.mirror(confirmCard({ id: 'x', kind: 'charge', label: 'Table 4', amount: '8', item: '2x latte', reachable: false, expiresInSec: 20 }, snap, 14), 'confirm')
     else c.mirror(tillCard(snap), 'till')
-    c.transcript('charge table four, two lattes')
+    if (!q.has('video')) c.transcript('charge table four, two lattes')
   }
 </script></body></html>
